@@ -1,10 +1,8 @@
 import javax.swing.*;
 import java.awt.event.WindowEvent;
-import java.io.*;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.Socket;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Created by james on 10/7/16.
@@ -35,30 +33,30 @@ public class NodeConnection implements AutoCloseable{
     frame.setSize(400,400);
     frame.setVisible(true);
     frame.repaint();
-    this.connection= new SocketInOutTriple(new Socket(address,HW2Console.PORT),window::display);
+    this.connection = new SocketInOutTriple(new Socket(address, HW2Console.PORT));
   }
 
-  public void sendCreateCommand(String filename) {
+  public void sendCreateCommand(String filename) throws IOException {
     if(open) {
-      connection.sendMessage("create",filename);
+      connection.blockingSendMessage("create", filename);
     }
   }
 
-  public void sendDeleteCommand(String filename) {
+  public void sendDeleteCommand(String filename) throws IOException {
     if(open) {
-      connection.sendMessage("delete",filename);
+      connection.blockingSendMessage("delete", filename);
     }
   }
 
-  public void sendReadCommand(String filename) {
+  public void sendReadCommand(String filename) throws IOException {
     if(open) {
-      connection.sendMessage("read",filename);
+      connection.blockingSendMessage("read", filename);
     }
   }
 
-  public void sendAppendCommand(String filename, String line) {
+  public void sendAppendCommand(String filename, String line) throws IOException {
     if(open) {
-      connection.sendMessage("append",filename,line);
+      connection.blockingSendMessage("append", filename, line);
     }
   }
 
@@ -66,10 +64,12 @@ public class NodeConnection implements AutoCloseable{
     return open;
   }
 
-  public void close() throws IOException {
+  public void close() {
     if (open) {
       open = false;
-      connection.blockingSendMessage("Exit");
+      try {
+        connection.blockingSendMessage("Exit");
+      } catch (Exception ignored) {}
       connection.close();
       frame.dispatchEvent(new WindowEvent(frame, WindowEvent.WINDOW_CLOSING));
     }

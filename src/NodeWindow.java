@@ -1,7 +1,6 @@
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
+import java.io.IOException;
 
 /**
  * Created by james on 10/7/16.
@@ -27,41 +26,45 @@ public class NodeWindow {
         if (!message.contains(" ") && message.equalsIgnoreCase("exit")) {
           display("Invalid Command.");
         } else if (message.equalsIgnoreCase("exit") || message.equalsIgnoreCase("quit")) {
-          connection.stop();
+          connection.close();
         } else {
-          String[] commmand = message.split(" ");
-          switch (commmand[0]) {
-            case "create":
-              if (commmand.length != 2) {
-                display("The create command only takes a filename as an argument.");
-              } else {
-                connection.sendCreateCommand(commmand[1]);
-              }
-              break;
-            case "delete":
-              if (commmand.length != 2) {
-                display("The delete command only takes a filename as an argument.");
-              } else {
-                connection.sendDeleteCommand(commmand[1]);
-              }
-              break;
-            case "read":
-              if (commmand.length != 2) {
-                display("The read command only takes a filename as an argument.");
-              } else {
-                connection.sendReadCommand(commmand[1]);
-              }
-              break;
-            case "append":
-              if (commmand.length != 3) {
-                display("The append command takes a filename and a line of text as an argument.");
-              } else {
-                connection.sendAppendCommand(commmand[1], message.substring(message.indexOf(" ", message.indexOf(" ") + 1) + 1));
-              }
-              break;
-            default:
-              display("Invalid Command.");
-              break;
+          try {
+            String[] commmand = message.split(" ");
+            switch (commmand[0]) {
+              case "create":
+                if (commmand.length != 2) {
+                  display("The create command only takes a filename as an argument.");
+                } else {
+                  connection.sendCreateCommand(commmand[1]);
+                }
+                break;
+              case "delete":
+                if (commmand.length != 2) {
+                  display("The delete command only takes a filename as an argument.");
+                } else {
+                  connection.sendDeleteCommand(commmand[1]);
+                }
+                break;
+              case "read":
+                if (commmand.length != 2) {
+                  display("The read command only takes a filename as an argument.");
+                } else {
+                  connection.sendReadCommand(commmand[1]);
+                }
+                break;
+              case "append":
+                if (commmand.length != 3) {
+                  display("The append command takes a filename and a line of text as an argument.");
+                } else {
+                  connection.sendAppendCommand(commmand[1], message.substring(message.indexOf(" ", message.indexOf(" ") + 1) + 1));
+                }
+                break;
+              default:
+                display("Invalid Command.");
+                break;
+            }
+          } catch (IOException ignored) {
+
           }
         }
       }

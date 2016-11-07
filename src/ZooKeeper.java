@@ -2,9 +2,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.net.Inet4Address;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.util.HashMap;
 import java.util.function.Consumer;
@@ -54,7 +52,7 @@ public class ZooKeeper implements Consumer<String[]>, AutoCloseable {
     try (ServerSocket server = new ServerSocket(HW2Console.PORT)) {
       while (true) {
         try(ZooKeeper keeper=new ZooKeeper()){
-          try (SocketInOutTriple connection = new SocketInOutTriple(server.accept(),keeper)) {
+          try (SocketInOutTriple connection = new SocketInOutTriple(server.accept())) {
             keeper.setServerConnection(connection);
             while(keeper.running){
               Thread.sleep(500);
