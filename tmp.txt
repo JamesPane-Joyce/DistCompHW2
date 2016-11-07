@@ -1,0 +1,6 @@
+sudo yum -y update; sudo yum -y install java-1.8.0; sudo yum remove -y java-1.7.0-openjdk
+pkill -9 java; pkill -9 java; nohup java -jar Node.jar &
+pkill -9 java; java -jar Node.jar
+
+
+scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@54.173.178.119:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@54.166.244.235:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@54.165.20.254:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@54.164.244.225:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@54.164.76.220:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@54.158.116.70:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@54.158.65.207:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@54.88.230.218:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@52.87.207.108:~;scp -i /home/james/.ssh/DistributedSystems.pem Node.jar ec2-user@52.23.195.231:~

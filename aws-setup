@@ -1,0 +1,25 @@
+#!/usr/bin/expect -f
+
+spawn ssh -i "/home/james/.ssh/DistributedSystems.pem" "ec2-user@54.162.15.173"
+expect {
+  -re ".*es.*o.*" {
+    exp_send "yes\r"
+    exp_continue
+  }
+  exp_send "sudo yum update"
+  -re ".*es.*o.*" {
+    exp_send "yes\r"
+    exp_continue
+  }
+}
+
+spawn scp -i "/home/james/.ssh/DistributedSystems.pem" Node.jar "ec2-user@54.162.15.173:~"
+expect {
+  -re ".*es.*o.*" {
+    exp_send "yes\r"
+    exp_continue
+  }
+  -re ".*sword.*" {
+    exp_send "PASSWORD\r"
+  }
+}
