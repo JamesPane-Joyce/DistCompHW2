@@ -1,5 +1,7 @@
 import java.io.IOException;
 import java.net.Socket;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.TransferQueue;
 import java.util.function.Consumer;
@@ -8,6 +10,7 @@ import java.util.function.Consumer;
  * Useful small class for sending asynchronous messages through a socket.
  */
 public class AsyncSocketInOutTriple extends SocketInOutTriple {
+  private static final ExecutorService pool = Executors.newCachedThreadPool();
   public final TransferQueue<String[]> messageOutQueue=new LinkedTransferQueue<>();
   private final Consumer<String[]> messageConsumer;
   public AsyncSocketInOutTriple(Socket socket, Consumer<String[]> messageConsumer) throws IOException {

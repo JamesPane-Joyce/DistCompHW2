@@ -4,8 +4,6 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Useful small class for containing a Socket and the in and out streams that can close them.
@@ -14,7 +12,6 @@ public class SocketInOutTriple implements AutoCloseable {
   /**
    * A threadpool for the server.
    */
-  protected static final ExecutorService pool = Executors.newCachedThreadPool();
   public final Socket socket;
   public final ObjectInputStream in;
   public final ObjectOutputStream out;

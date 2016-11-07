@@ -1,7 +1,11 @@
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Scanner;
 
 /**
  * Small command line script for connecting to Amazon EC2 for the first homework.
@@ -17,7 +21,7 @@ public abstract class HW2Console {
     if(args.length!=1) {
       System.err.println("usage: HW2Console ip_addresses.txt");
     }
-    HashMap<String, InetAddress> serverLocationMap = ZooKeeper.readAddressFile(args[0]);
+    HashMap<String, InetAddress> serverLocationMap = readAddressFile(args[0]);
     ArrayList<NodeConnection> connections=new ArrayList<>();
     try {
       System.out.println("Enter the name of a server to establish a client.\n" +
@@ -39,6 +43,24 @@ public abstract class HW2Console {
     }finally {
       connections.forEach(c->{if(c.open())c.close();});
     }
+  }
+
+  public static HashMap<String, InetAddress> readAddressFile(String fileLocation) {
+    File ipAddressesFile = new File(fileLocation);
+    HashMap<String, InetAddress> nameAddressMap = new HashMap<>();
+    try (BufferedReader ipAddressesFileReader = new BufferedReader(new FileReader(ipAddressesFile))) {
+      String line;
+      String[] splitLine;
+      while ((line = ipAddressesFileReader.readLine()) != null && !line.trim().equals("")) {
+        splitLine = line.split(" ");
+        nameAddressMap.put(splitLine[0], InetAddress.getByName(splitLine[1]));
+      }
+    } catch (Exception e) {
+      e.printStackTrace();
+      System.out.println("THERE WAS AN ERROR READING THE FILE CONTAINING THE NAMES OF SERVERS AND THEIR ADDRESSES.");
+      System.exit(-1);
+    }
+    return nameAddressMap;
   }
 }
 
