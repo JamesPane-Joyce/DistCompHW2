@@ -84,7 +84,42 @@ public class ZooKeeper implements AutoCloseable {
     pool.execute(consoleMessageSender);
     //Read each file line.
     BufferedReader addressReader = new BufferedReader(new FileReader(ipAddresses));
-    //TODO startup read log code
+    if (!log.createNewFile()) {
+      handleConsoleOutput("Beginning to read pre-existing log file.");
+      try (BufferedReader logStream = new BufferedReader(new FileReader(log))) {
+        String line;
+        while ((line = logStream.readLine()) != null && (line = line.trim()).equals("")) {
+          int spaceIndex = line.indexOf(' ');
+          if (spaceIndex < 0) {
+            handleConsoleOutput(new RuntimeException("THERE WAS AN ERROR IN THE PREVIOUSLY EXISTING LOG FILE'S DATA, LINE WITHOUT SPACE."), true);
+          }
+          String firstWord = line.substring(0, spaceIndex);
+          switch (firstWord) {
+            case "create": {
+              handleConsoleOutput("Running create command from log file.");
+              create(line.substring(firstWord.length() + 1));
+              break;
+            }
+            case "delete": {
+              handleConsoleOutput("Running delete command from log file.");
+              delete(line.substring(firstWord.length() + 1));
+              break;
+            }
+            case "append": {
+              handleConsoleOutput("Running append command from log file.");
+              int secondSpaseIndex = line.indexOf(' ', spaceIndex + 1);
+              delete(line.substring(spaceIndex + 1, secondSpaseIndex));
+              break;
+            }
+            default: {
+              handleConsoleOutput(new RuntimeException("THERE WAS AN ERROR IN THE PREVIOUSLY EXISTING LOG FILE'S DATA, UNRECOGNIZED COMMAND."), true);
+              break;
+            }
+          }
+        }
+      }
+      handleConsoleOutput("Finished to reading pre-existing log file.");
+    }
     ID = Integer.parseInt(addressReader.readLine());
     handleConsoleOutput("Started node #" + ID);
     String line;
@@ -161,7 +196,7 @@ public class ZooKeeper implements AutoCloseable {
 
   private synchronized void delete(String tokenName) {}
 
-  private synchronized void create(String tokenName, String ownerName) {}
+  private synchronized void create(String tokenName) {}
 
   private void setServerConnection(SocketInOutTriple connection){}
 
