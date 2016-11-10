@@ -2,10 +2,7 @@ import java.io.*;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedTransferQueue;
@@ -34,7 +31,7 @@ public class ZooKeeper implements AutoCloseable {
     }
     switch (message[0]) {
       case SERVER_CREATE_FILE_MESSAGE:
-        create(message[1],message[2]);
+        create(message[1]);
         break;
       case SERVER_DELETE_FILE_MESSAGE:
         delete(message[1]);
@@ -43,7 +40,7 @@ public class ZooKeeper implements AutoCloseable {
         read(message[1]);
         break;
       case SERVER_APPEND_FILE_MESSAGE:
-        append(message[1],message[2]);
+        append(message[1], String.join(" ", (CharSequence[]) Arrays.copyOfRange(message, 1, message.length)));
         break;
     }
   };
