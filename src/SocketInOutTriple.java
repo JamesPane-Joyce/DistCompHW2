@@ -1,4 +1,4 @@
-import org.jetbrains.annotations.Nullable;
+
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -41,7 +41,7 @@ public class SocketInOutTriple implements AutoCloseable {
     return open;
   }
 
-  public synchronized @Nullable String[] blockingRecvMessage() throws IOException, ClassNotFoundException {
+  public synchronized String[] blockingRecvMessage() throws IOException, ClassNotFoundException {
     if(!open){
       return null;
     }
