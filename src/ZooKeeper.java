@@ -12,21 +12,21 @@ import java.util.function.Consumer;
  * Created by james on 10/27/16.
  */
 public class ZooKeeper implements AutoCloseable {
-  private boolean running=true;
+  private boolean running = true;
   private static final ExecutorService pool = Executors.newCachedThreadPool();
   public static final int INTER_NODE_PORT = HW2Console.PORT + 255;
-  public static final String SERVER_CREATE_FILE_MESSAGE="CREATE";
-  public static final String SERVER_DELETE_FILE_MESSAGE="DELETE";
-  public static final String SERVER_READ_FILE_MESSAGE="READ";
-  public static final String SERVER_APPEND_FILE_MESSAGE="APPEND";
-  public static final String SERVER_END_ZOOKEEPER="EXIT";
+  public static final String SERVER_CREATE_FILE_MESSAGE = "CREATE";
+  public static final String SERVER_DELETE_FILE_MESSAGE = "DELETE";
+  public static final String SERVER_READ_FILE_MESSAGE = "READ";
+  public static final String SERVER_APPEND_FILE_MESSAGE = "APPEND";
+  public static final String SERVER_END_ZOOKEEPER = "EXIT";
   public final List<AsyncSocketInOutTriple> consoleConnections = Collections.synchronizedList(new ArrayList<>());
   private final int ID;
   private final LinkedTransferQueue<String> consoleMessageQueue = new LinkedTransferQueue<>();
   private final HashMap<String, SocketInOutTriple> connections = new HashMap<>();
   private final Consumer<String[]> consoleMessageConsumer = (message) -> {
-    if(message==null||message.length==0) return;
-    if(message.length==1&&(message[0].equals(SERVER_END_ZOOKEEPER))) {
+    if (message == null || message.length == 0) return;
+    if (message.length == 1 && (message[0].equals(SERVER_END_ZOOKEEPER))) {
       try { close(); } catch (Exception ignored) {}
     }
     switch (message[0]) {
@@ -195,7 +195,7 @@ public class ZooKeeper implements AutoCloseable {
 
   private synchronized void create(String tokenName) {}
 
-  private void setServerConnection(SocketInOutTriple connection){}
+  private void setServerConnection(SocketInOutTriple connection) {}
 
   /**
    * The ip addresses file should be first, and should contain the ID of this node, and then on each line the IP
@@ -226,7 +226,7 @@ public class ZooKeeper implements AutoCloseable {
 
 
   @Override
-  public void close(){
-    running=false;
+  public void close() {
+    running = false;
   }
 }
