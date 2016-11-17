@@ -6,7 +6,10 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedTransferQueue;
+import java.util.concurrent.locks.StampedLock;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Created by james on 10/27/16.
@@ -14,16 +17,23 @@ import java.util.function.Consumer;
 public class ZooKeeper implements AutoCloseable {
   private boolean running = true;
   private static final ExecutorService pool = Executors.newCachedThreadPool();
-  public static final int INTER_NODE_PORT = HW2Console.PORT + 255;
+  public static final int INTER_NODE_SETUP_PORT = HW2Console.PORT + 255;
+  public static final int INTER_NODE_COMM_PORT = INTER_NODE_SETUP_PORT + 255;
   public static final String SERVER_CREATE_FILE_MESSAGE = "CREATE";
   public static final String SERVER_DELETE_FILE_MESSAGE = "DELETE";
   public static final String SERVER_READ_FILE_MESSAGE = "READ";
   public static final String SERVER_APPEND_FILE_MESSAGE = "APPEND";
   public static final String SERVER_END_ZOOKEEPER = "EXIT";
+  public static final String VOTE_ABORT = "VOTE_ABORT";
+  public static final String VOTE_COMMIT = "VOTE_COMMIT";
+  public static final String ABORT = "ABORT";
+  public static final String COMMIT = "COMMIT";
+  public final HashMap<String, String> tokenContents = new HashMap<>();
+  public final StampedLock globalConnectionLock = new StampedLock();
   public final List<AsyncSocketInOutTriple> consoleConnections = Collections.synchronizedList(new ArrayList<>());
   private final int ID;
   private final LinkedTransferQueue<String> consoleMessageQueue = new LinkedTransferQueue<>();
-  private final HashMap<String, SocketInOutTriple> connections = new HashMap<>();
+  private final HashMap<String, InetAddress> connections = new HashMap<>();
   private final Consumer<String[]> consoleMessageConsumer = (message) -> {
     if (message == null || message.length == 0) return;
     if (message.length == 1 && (message[0].equals(SERVER_END_ZOOKEEPER))) {
@@ -40,7 +50,7 @@ public class ZooKeeper implements AutoCloseable {
         read(message[1]);
         break;
       case SERVER_APPEND_FILE_MESSAGE:
-        append(message[1], String.join(" ", (CharSequence[]) Arrays.copyOfRange(message, 1, message.length)));
+        append(message[1], String.join(" ", message).substring(message[0].length() + message[1].length() + 2));
         break;
     }
   };
@@ -58,7 +68,7 @@ public class ZooKeeper implements AutoCloseable {
       }
     });
     //This node sends all messages to each console, and prints them to standard out.
-    Runnable consoleMessageSender = () -> {
+    pool.execute(() -> {
       while (running) {
         try {
           String message = consoleMessageQueue.take();
@@ -73,12 +83,9 @@ public class ZooKeeper implements AutoCloseable {
             }
           }
           System.out.println(message);
-        } catch (InterruptedException ignored) {
-          continue;
-        }
+        } catch (InterruptedException ignored) {}
       }
-    };
-    pool.execute(consoleMessageSender);
+    });
     //Read each file line.
     BufferedReader addressReader = new BufferedReader(new FileReader(ipAddresses));
     if (!log.createNewFile()) {
@@ -127,33 +134,15 @@ public class ZooKeeper implements AutoCloseable {
     handleConsoleOutput("Successfully read file \"" + ipAddresses.getName() + "\"");
     pool.execute(() -> {
       try {
-        try (ServerSocket server = new ServerSocket(INTER_NODE_PORT)) {
+        try (ServerSocket server = new ServerSocket(INTER_NODE_SETUP_PORT)) {
           while (connections.size() < addressList.size() - 1) {
-            SocketInOutTriple tmp = new SocketInOutTriple(server.accept());
-            try {
-              String[] message = tmp.blockingRecvMessage();
-              if (message == null) {
-                throw new Exception("The first connection established by a node died before it sent a name.");
-              } else {
-                connections.put(message[0], tmp);
-                handleConsoleOutput("Node #" + ID + " received the first connection from Node #" + message[0]);
-              }
-            } catch (Exception e) {
-              handleConsoleOutput(e, true);
-            }
-          }
-          while (running) {
-            SocketInOutTriple tmp = new SocketInOutTriple(server.accept());
-            try {
-              String[] message = tmp.blockingRecvMessage();
-              if (message == null) {
-                continue;
-              } else {
-                connections.put(message[0], tmp);
-                handleConsoleOutput("Node #" + ID + " received a new connection from Node #" + message[0]);
-              }
-            } catch (Exception e) {
-              handleConsoleOutput(e, true);
+            try (SocketInOutTriple tmp = new SocketInOutTriple(server.accept())) {
+              String nodeName = (String) tmp.in.readObject();
+              InetAddress nodeAddress = (InetAddress) tmp.in.readObject();
+              connections.put(nodeName, nodeAddress);
+              handleConsoleOutput("Node #" + ID + " received the first connection from Node #" + nodeName);
+            } catch (ClassNotFoundException e) {
+              e.printStackTrace();
             }
           }
         }
@@ -161,11 +150,19 @@ public class ZooKeeper implements AutoCloseable {
         handleConsoleOutput(e, true);
       }
     });
+    InetAddress selfAddress = addressList.get(ID);
     for (int i = 0; i < addressList.size(); i++) {
       if (i == ID) continue;
-      SocketInOutTriple connection = new SocketInOutTriple(new Socket(addressList.get(i), INTER_NODE_PORT));
-      connection.blockingSendMessage(ID + "");
-      connections.put(ID + "", connection);
+      try (SocketInOutTriple connection = new SocketInOutTriple(new Socket(addressList.get(i), INTER_NODE_SETUP_PORT))) {
+        connection.out.writeObject(ID);
+        connection.out.writeObject(selfAddress);
+        connection.out.flush();
+      }
+    }
+    while (connections.size() < addressList.size() - 1) {
+      try {
+        Thread.sleep(100);
+      } catch (InterruptedException ignored) {}
     }
   }
 
@@ -187,15 +184,63 @@ public class ZooKeeper implements AutoCloseable {
     consoleMessageQueue.add(message);
   }
 
-  private synchronized void append(String tokenName, String line) {}
+  private synchronized void append(String tokenName, String line) {
+    tokenContents.compute(tokenName, (k, v) -> v + line);
+  }
 
-  private synchronized void read(String tokenName) {}
+  private boolean twoPhaseCommit(String message[]) {
+    List<SocketInOutTriple> sockets = connections.keySet().parallelStream().
+      flatMap(a -> {
+        try {
+          SocketInOutTriple out = new SocketInOutTriple(new Socket(a, INTER_NODE_COMM_PORT));
+          return Stream.of(out);
+        } catch (IOException e) {
+          return Stream.empty();
+        }
+      }).
+      filter(s -> {
+        try {
+          s.blockingSendMessage(message);
+          return true;
+        } catch (IOException e) {
+          return false;
+        }
+      }).collect(Collectors.toList());
+    long commitsReceived = sockets.parallelStream().filter(s -> {
+      try {
+        return Optional.ofNullable(s.blockingRecvMessage()).filter(m -> m[0].equals(VOTE_COMMIT)).isPresent();
+      } catch (IOException | ClassNotFoundException e) {
+        return false;
+      }
+    }).count();
+    if (commitsReceived != connections.size()) {
+      sockets.forEach(s -> {
+        try {
+          s.blockingSendMessage(ABORT);
+        } catch (IOException ignored) {}
+      });
+      return false;
+    } else {
+      sockets.forEach(s -> {
+        try {
+          s.blockingSendMessage(COMMIT);
+        } catch (IOException ignored) {}
+      });
+      return true;
+    }
+  }
 
-  private synchronized void delete(String tokenName) {}
+  private synchronized void read(String tokenName) {
+    handleConsoleOutput("File \"" + tokenName + "\':\n" + tokenContents.get(tokenName) + "End of File \"" + tokenName + "\"");
+  }
 
-  private synchronized void create(String tokenName) {}
+  private synchronized void delete(String tokenName) {
+    tokenContents.remove(tokenName);
+  }
 
-  private void setServerConnection(SocketInOutTriple connection) {}
+  private synchronized void create(String tokenName) {
+    tokenContents.put(tokenName, "");
+  }
 
   /**
    * The ip addresses file should be first, and should contain the ID of this node, and then on each line the IP
@@ -229,6 +274,5 @@ public class ZooKeeper implements AutoCloseable {
   public void close() {
     running = false;
     consoleConnections.forEach(c -> {if (c.isOpen()) c.close();});
-    connections.forEach((k, v) -> {if (v.isOpen()) v.close();});
   }
 }
