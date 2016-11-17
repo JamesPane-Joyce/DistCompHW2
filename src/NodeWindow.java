@@ -29,34 +29,34 @@ public class NodeWindow {
           connection.close();
         } else {
           try {
-            String[] commmand = message.split(" ");
-            switch (commmand[0]) {
+            String[] command = message.split(" ");
+            switch (command[0]) {
               case "create":
-                if (commmand.length != 2) {
+                if (command.length != 2) {
                   display("The create command only takes a filename as an argument.");
                 } else {
-                  connection.sendCreateCommand(commmand[1]);
+                  connection.sendCreateCommand(command[1]);
                 }
                 break;
               case "delete":
-                if (commmand.length != 2) {
+                if (command.length != 2) {
                   display("The delete command only takes a filename as an argument.");
                 } else {
-                  connection.sendDeleteCommand(commmand[1]);
+                  connection.sendDeleteCommand(command[1]);
                 }
                 break;
               case "read":
-                if (commmand.length != 2) {
+                if (command.length != 2) {
                   display("The read command only takes a filename as an argument.");
                 } else {
-                  connection.sendReadCommand(commmand[1]);
+                  connection.sendReadCommand(command[1]);
                 }
                 break;
               case "append":
-                if (commmand.length != 3) {
+                if (command.length != 3) {
                   display("The append command takes a filename and a line of text as an argument.");
                 } else {
-                  connection.sendAppendCommand(commmand[1], message.substring(message.indexOf(" ", message.indexOf(" ") + 1) + 1));
+                  connection.sendAppendCommand(command[1], message.substring(message.indexOf(" ", message.indexOf(" ") + 1) + 1));
                 }
                 break;
               default:

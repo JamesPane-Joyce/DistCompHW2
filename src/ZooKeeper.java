@@ -228,5 +228,7 @@ public class ZooKeeper implements AutoCloseable {
   @Override
   public void close() {
     running = false;
+    consoleConnections.forEach(c -> {if (c.isOpen()) c.close();});
+    connections.forEach((k, v) -> {if (v.isOpen()) v.close();});
   }
 }
