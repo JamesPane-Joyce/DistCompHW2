@@ -85,7 +85,7 @@ public class ZooKeeper implements AutoCloseable {
       handleConsoleOutput("Beginning to read pre-existing log file.");
       try (BufferedReader logStream = new BufferedReader(new FileReader(log))) {
         String line;
-        while ((line = logStream.readLine()) != null && (line = line.trim()).equals("")) {//ToDo Ask if this is supposed to be negated
+        while ((line = logStream.readLine()) != null && !(line = line.trim()).equals("")) {
           int spaceIndex = line.indexOf(' ');
           if (spaceIndex < 0) {
             handleConsoleOutput(new RuntimeException("THERE WAS AN ERROR IN THE PREVIOUSLY EXISTING LOG FILE'S DATA, LINE WITHOUT SPACE."), true);
@@ -105,7 +105,7 @@ public class ZooKeeper implements AutoCloseable {
             case "append": {
               handleConsoleOutput("Running append command from log file.");
               int secondSpaseIndex = line.indexOf(' ', spaceIndex + 1);
-              delete(line.substring(spaceIndex + 1, secondSpaseIndex)); //ToDo Ask if this is supposed to be append
+              append(line.substring(firstWord.length() + 1, secondSpaseIndex), line.substring(secondSpaseIndex + 1));
               break;
             }
             default: {
