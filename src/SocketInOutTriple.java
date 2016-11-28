@@ -6,6 +6,7 @@ import java.net.Socket;
 /**
  * Useful small class for containing a Socket and the in and out streams that can close them.
  */
+@SuppressWarnings("WeakerAccess")
 public class SocketInOutTriple implements AutoCloseable {
   /**
    * A threadpool for the server.
@@ -33,9 +34,9 @@ public class SocketInOutTriple implements AutoCloseable {
     try {socket.close();} catch (Exception ignored) {}
   }
 
-  public synchronized boolean blockingSendMessage(String... exit) throws IOException {
+  public synchronized boolean blockingSendMessage(String... message) throws IOException {
     if (open) {
-      out.writeObject(exit);
+      out.writeObject(message);
     }
     return open;
   }
