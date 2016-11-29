@@ -72,7 +72,7 @@ public class NodeConsole implements AutoCloseable {
     if (open) {
       open = false;
       try {
-        connection.blockingSendMessage("Exit");
+        connection.blockingSendMessage(ZooKeeperNode.SERVER_END_ZOOKEEPER);
       } catch (Exception ignored) {}
       connection.close();
       frame.dispatchEvent(new WindowEvent(frame, WindowEvent.WINDOW_CLOSING));

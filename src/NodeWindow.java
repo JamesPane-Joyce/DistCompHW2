@@ -23,9 +23,7 @@ public class NodeWindow {
       } else {
         inputPane.setText("");
         display(message);
-        if (!message.contains(" ") && message.equalsIgnoreCase("exit")) {
-          display("Invalid Command.");
-        } else if (message.equalsIgnoreCase("exit") || message.equalsIgnoreCase("quit")) {
+        if (message.equalsIgnoreCase("exit") || message.equalsIgnoreCase("quit")) {
           connection.close();
         } else {
           try {

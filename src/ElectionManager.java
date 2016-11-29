@@ -44,6 +44,8 @@ public interface ElectionManager {
    */
   boolean isLeader();
 
+  void close();
+
   /**
    * A facsimile of the BullyManager Algorithm but uses TCP to loosen the need for timers .
    */
@@ -83,7 +85,8 @@ public interface ElectionManager {
     private final Consumer<String> messageConsumer;
     /** Socket being kept for pinging purposes. */
     private SocketInOutTriple pingLeader;
-
+    /** Sadly server needs to be killed sometimes to create a new one if this instance persists.*/
+    private final ServerSocket server;
     /**
      * Create an ElectionManager that follows the Bully Algorithm approximately.
      * @param otherNodes A map of other node IDs to InetAddresses.
@@ -102,8 +105,16 @@ public interface ElectionManager {
       this.getLastTimestampDeliveredLocally=getLastTimestampDeliveredLocally;
       this.getLocalHisTree=getLocalHisTree;
       this.messageConsumer=messageConsumer;
+      ServerSocket tmp=null;
+      try {
+        tmp=new ServerSocket(ELECTION_PORT);
+      } catch (IOException e) {
+        messageConsumer.accept("THERE WAS AN ERROR ATTEMPTING TO SET UP A SERVER SOCKET FOR ELECTIONS.");
+        System.exit(-1);
+      }
+      server=tmp;
       pool.execute(()->{
-        try(ServerSocket server=new ServerSocket(ELECTION_PORT)) {
+        try{
           while (!isDone.getAsBoolean()) {
             new ConsumerBasedSocketInOutTriple(
               server.accept(),
@@ -147,11 +158,10 @@ public interface ElectionManager {
                 }
                 c.close();
               },
-              Throwable::printStackTrace);
+              (e)->{});
           }
         } catch (IOException e) {
-          e.printStackTrace();
-          System.exit(-1);
+          messageConsumer.accept("MESSAGE DROPPED IN LEADER ELECTOR.");
         }
       });
       initiateElection();
@@ -195,6 +205,7 @@ public interface ElectionManager {
                 return Stream.of(e.getValue());
               }
             }
+            e.getValue().close();
           } catch (IOException | ClassNotFoundException ignored) {}
           return Stream.empty();
         }).
@@ -256,7 +267,7 @@ public interface ElectionManager {
       try(SocketInOutTriple connection=new SocketInOutTriple(new Socket(otherNodes.get(getLeaderID()),ELECTION_PORT))){
         connection.blockingSendMessage(GET_LEADER_HISTORY_TREE);
         TreeMap<Timestamp,String[]> hisTree=new TreeMap<>();
-        while(connection.blockingRecvMessage()[0].endsWith(NEXT)){
+        while(connection.blockingRecvMessage()[0].equals(NEXT)){
           hisTree.put((Timestamp) connection.in.readObject(),connection.blockingRecvMessage());
         }
         return hisTree;
@@ -268,6 +279,11 @@ public interface ElectionManager {
     @Override
     public boolean isLeader() {
       return selfID==leader;
+    }
+    public void close(){
+      try {
+        server.close();
+      } catch (IOException ignored) {}
     }
   }
 }
