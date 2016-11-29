@@ -13,18 +13,12 @@ import java.util.concurrent.locks.StampedLock;
  */
 @SuppressWarnings({"WeakerAccess", "FieldCanBeLocal"})
 public class ZooKeeperNode implements AutoCloseable {
-  /**
-   * Boolean that is true while this node in a ZooKeeperNode algorithm has not crashed.
-   */
+  /** Boolean that is true while this node in a ZooKeeperNode algorithm has not crashed. */
   private boolean running = true;
-  /**
-   * Pool of executors that all local ZooKeeperNodes use to preform jobs.
-   */
+  /** Pool of executors that all local ZooKeeperNodes use to preform jobs. */
   private static final ExecutorService pool = Executors.newCachedThreadPool();
-  /** Port that all ZooKeeperNodes use for setup communications. */
-  public static final int INTER_NODE_SETUP_PORT = HW2Console.PORT + 255;
   /** Port that all ZooKeeperNodes use for runtime communications. */
-  public static final int INTER_NODE_COMM_PORT = INTER_NODE_SETUP_PORT + 255;
+  public static final int INTER_NODE_COMM_PORT = HW2Console.PORT + 255;
   /** String sent from the console or read from the log that says to create a file. */
   public static final String CREATE_FILE_COMMAND = "CREATE";
   /** String sent from the console or read from the log that says to create a file. */
@@ -84,7 +78,7 @@ public class ZooKeeperNode implements AutoCloseable {
       handleConsoleOutput(e, true);
     }
   };
-  /** Thread that sets up a ServerSocket accepting messages other ZooKeeperNodes that are starting up. */
+  /** Thread that sets up a ServerSocket accepting messages from consoles that are starting up. */
   private final Runnable incomingStartupMessageThread = () -> {
     while (running) {
       try {
@@ -129,18 +123,12 @@ public class ZooKeeperNode implements AutoCloseable {
   /** The writer that goes to the log. */
   private final BufferedWriter logWriter;
 
-  /**
-   * The Timestamp of the most recent delivered command.
-   */
+  /** The Timestamp of the most recent delivered command. */
   private Timestamp newestDeliveredTimestamp = new Timestamp(0, -1);
-  /**
-   * The Timestamp of the current command. Incremented when a leader sends out the call or the call is received.
-   */
+  /** The Timestamp of the current command. Incremented when a leader sends out the call or the call is received. */
   private Timestamp currentTimestamp = new Timestamp(0, -1);
-  /**
-   * A map of the most recent Timestamp seen within each epoch, given that they'll have different lengths and we need
-   * to block based on the most recently delivered one.
-   */
+  /** A map of the most recent Timestamp seen within each epoch, given that they'll have different lengths and we need
+   * to block based on the most recently delivered one. */
   private HashMap<Integer, Timestamp> newestTimestampsInEpoch = new HashMap<>();
 
   /**
@@ -165,48 +153,17 @@ public class ZooKeeperNode implements AutoCloseable {
     ID = Integer.parseInt(line.trim());
     handleConsoleOutput("Started node #" + ID);
     //Collect a list of all the InetAddresses of every ZooKeeperNode.
-    ArrayList<InetAddress> addressList = new ArrayList<>();
+    int ctr=0;
+    InetAddress tmp=null;
     while ((line = addressReader.readLine()) != null && !(line = line.trim()).equals("")) {
-      addressList.add(InetAddress.getByName(line));
+      if(ctr==ID){++ctr;tmp=InetAddress.getByName(line); continue;}
+      otherNodeAddresses.put(ctr++,InetAddress.getByName(line));
     }
-    selfAddress = addressList.get(ID);
+    selfAddress=tmp;
+    if(selfAddress==null) handleConsoleOutput(new RuntimeException("THIS NODE NEVER READ IT'S OWN ADDRESS."),true);
     handleConsoleOutput("Successfully read file \"" + ipAddresses.getName() + "\"");
     //Receive introductions to each ZooKeeperNode.
     pool.execute(interNodeCommunicationAcceptor);
-    pool.execute(() -> {
-      try {
-        try (ServerSocket server = new ServerSocket(INTER_NODE_SETUP_PORT)) {
-          while (otherNodeAddresses.size() < addressList.size()) {
-            try (SocketInOutTriple tmp = new SocketInOutTriple(server.accept())) {
-              int otherNodeID = (int) tmp.in.readObject();
-              InetAddress nodeAddress = (InetAddress) tmp.in.readObject();
-              otherNodeAddresses.put(otherNodeID, nodeAddress);
-              handleConsoleOutput("Node #" + ID + " received the first connection from Node #" + otherNodeID);
-            } catch (ClassNotFoundException e) {
-              e.printStackTrace();
-            }
-          }
-          //We send introductions to ourselves, but we don't care.
-          otherNodeAddresses.remove(ID);
-        }
-      } catch (IOException e) {
-        handleConsoleOutput(e, true);
-      }
-    });
-    //Send introductions to each ZooKeeperNode.
-    addressList.forEach(a -> {
-      try (SocketInOutTriple connection = new SocketInOutTriple(new Socket(a, INTER_NODE_SETUP_PORT))) {
-        connection.out.writeObject(ID);
-        connection.out.writeObject(selfAddress);
-        connection.out.flush();
-      } catch (IOException e) {
-        handleConsoleOutput(e, true);
-      }
-    });
-    //Hang construction until we've received all connections from the other ZooKeeperNodes.
-    while (otherNodeAddresses.size() < addressList.size() - 1) {
-      safeSleep(100);
-    }
   }
 
   /**
@@ -314,7 +271,7 @@ public class ZooKeeperNode implements AutoCloseable {
     //Spin up threads to repeatedly attempt to communicate with each follower
     //Thought about using parallel stream but that has a hard limit on the threadpool which could cause problems
     otherNodeAddresses.values().forEach(a -> pool.execute(() -> {
-      while (true) {
+      while (running) {
         long lock = quorumLock.readLock();
         if (quorum[0] > (otherNodeAddresses.size() + 1) / 2) {
           quorumLock.unlockRead(lock);
@@ -329,7 +286,7 @@ public class ZooKeeperNode implements AutoCloseable {
           lock = quorumLock.writeLock();
           ++quorum[0];
           quorumLock.unlockWrite(lock);
-          while (true) {
+          while (running) {
             lock = quorumLock.readLock();
             if (quorum[0] > (otherNodeAddresses.size() + 1) / 2) {
               quorumLock.unlockRead(lock);
@@ -345,7 +302,7 @@ public class ZooKeeperNode implements AutoCloseable {
       }
     }));
     //Block this thread while we wait for the quorum to be achieved
-    while (true) {
+    while (running) {
       long lock = quorumLock.readLock();
       if (quorum[0] > (otherNodeAddresses.size() + 1) / 2) {
         quorumLock.unlockRead(lock);
@@ -372,7 +329,7 @@ public class ZooKeeperNode implements AutoCloseable {
   }
 
   private static void safeSleep(int millis) {
-    try {Thread.sleep(millis);} catch (InterruptedException e) {}
+    try {Thread.sleep(millis);} catch (InterruptedException ignored) {}
   }
 
   /**

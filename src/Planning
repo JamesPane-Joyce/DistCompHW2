@@ -1,12 +1,12 @@
 Algorythms Needed
 
-    Bully
+    ElectionManager
     2 Phase Commit
     Zookeeper Atomic Broadcast
 
 Necessary Datastructures
 
-    Bully:
+    ElectionManager:
     Complete Graph of connections
         Correct and Updating Map to every every processes
             Map keys should likely be node nameConnection
@@ -36,9 +36,9 @@ Necessary Datastructures
 
 Types of Messages Needed
 
-    ELECTION for Bully
-    OK for Bully
-    COORDINATOR for Bully
+    ELECTION for ElectionManager
+    OK for ElectionManager
+    COORDINATOR for ElectionManager
 
     REQUEST for 2PC
     VOTE for 2PC
