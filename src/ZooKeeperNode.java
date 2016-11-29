@@ -156,7 +156,7 @@ public class ZooKeeperNode implements AutoCloseable {
     //Begin accepting commands from consoles.
     pool.execute(incomingConsoleMessageThread);
     //Update this Node's state from the log file.
-    updateFromLog(log);
+    updateFromOwnLog(log);
     logWriter = new BufferedWriter(new FileWriter(log, true));
     //Begin accepting commands from starting up ZooKeeperNodes.
     pool.execute(incomingStartupMessageThread);
@@ -219,10 +219,11 @@ public class ZooKeeperNode implements AutoCloseable {
    * @param log The File being read from.
    * @throws IOException Thrown if there is a problem reading the log.
    */
-  private void updateFromLog(File log) throws IOException {
+  private void updateFromOwnLog(File log) throws IOException {
     //If the log already exists.
     if (!log.createNewFile()) {
       handleConsoleOutput("Beginning to read pre-existing log file.");
+      TreeMap<Timestamp, String[]> hisTree = new TreeMap<>();
       try (BufferedReader logStream = new BufferedReader(new FileReader(log))) {
         String line;
         while ((line = logStream.readLine()) != null && !(line = line.trim()).equals("")) {
@@ -230,32 +231,48 @@ public class ZooKeeperNode implements AutoCloseable {
           if (spaceIndex < 0) {
             handleConsoleOutput(new RuntimeException("THERE WAS AN ERROR IN THE PREVIOUSLY EXISTING LOG FILE'S DATA, LINE WITHOUT SPACE."), true);
           }
-          String firstWord = line.substring(0, spaceIndex);
-          switch (firstWord) {
-            case CREATE_FILE_COMMAND: {
-              handleConsoleOutput("Running create command from log file.");
-              create(line.substring(spaceIndex + 1));
-              break;
-            }
-            case DELETE_FILE_COMMAND: {
-              handleConsoleOutput("Running delete command from log file.");
-              delete(line.substring(spaceIndex + 1));
-              break;
-            }
-            case APPEND_FILE_COMMAND: {
-              handleConsoleOutput("Running append command from log file.");
-              int secondSpaseIndex = line.indexOf(' ', spaceIndex + 1);
-              append(line.substring(spaceIndex + 1, secondSpaseIndex), line.substring(secondSpaseIndex + 1));
-              break;
-            }
-            default: {
-              handleConsoleOutput(new RuntimeException("THERE WAS AN ERROR IN THE PREVIOUSLY EXISTING LOG FILE'S DATA, UNRECOGNIZED COMMAND."), true);
-              break;
-            }
+          int readEpoch = Integer.parseInt(line.substring(0, spaceIndex));
+          line = line.substring(spaceIndex + 1);
+          spaceIndex = line.indexOf(' ');
+          if (spaceIndex < 0) {
+            handleConsoleOutput(new RuntimeException("THERE WAS AN ERROR IN THE PREVIOUSLY EXISTING LOG FILE'S DATA, LINE WITHOUT COUNTER."), true);
           }
+          int readCounter = Integer.parseInt(line.substring(0, spaceIndex));
+          line = line.substring(spaceIndex + 1);
+          hisTree.put(new Timestamp(readEpoch, readCounter), line.split(" "));
         }
       }
+      executeHisTree(hisTree);
       handleConsoleOutput("Finished to reading pre-existing log file.");
+    }
+  }
+
+  /**
+   * Given an ordered TreeMap of Timestamps to their command Strings, execute the ones with the smallest stamps. Update
+   * current Timestamp and the most recent delivered Timestamp.
+   *
+   * @param hisTree The ordered TreeMap from least timestamp to most recent.
+   */
+  private void executeHisTree(TreeMap<Timestamp, String[]> hisTree) {
+    while (!hisTree.isEmpty()) {
+      Timestamp nextTime = hisTree.firstKey();
+      setCurrentTimestamp(nextTime);
+      String[] nextCommand = hisTree.pollFirstEntry().getValue();
+      switch (nextCommand[0]) {
+        case CREATE_FILE_COMMAND: {
+          create(nextCommand[1]);
+          break;
+        }
+        case APPEND_FILE_COMMAND: {
+          append(nextCommand[1], String.join(" ", nextCommand).substring(nextCommand[0].length() + nextCommand[1].length() + 2));
+          break;
+        }
+        case DELETE_FILE_COMMAND: {
+          delete(nextCommand[1]);
+          break;
+        }
+      }
+      newestDeliveredTimestamp = nextTime;
     }
   }
 
@@ -367,7 +384,7 @@ public class ZooKeeperNode implements AutoCloseable {
     setCurrentTimestamp((Timestamp) connection.in.readObject());
 
     String[] message = connection.blockingRecvMessage();
-    logWriter.write(String.join(" ", message) + "\n");
+    logWriter.write(currentTimestamp.toString() + " " + String.join(" ", message) + "\n");
     connection.blockingSendMessage(ACK);
     connection.blockingRecvMessage();
     while (currentTimestamp.epoch > newestDeliveredTimestamp.epoch &&
@@ -390,7 +407,9 @@ public class ZooKeeperNode implements AutoCloseable {
 
   private void setCurrentTimestamp(Timestamp timestamp) {
     newestTimestampsInEpoch.compute(timestamp.epoch, (k, v) -> v == null || v.counter < timestamp.counter ? timestamp : v);
-    currentTimestamp = timestamp;
+    if (timestamp.compareTo(currentTimestamp) > 0) {
+      currentTimestamp = timestamp;
+    }
   }
 
   /**
