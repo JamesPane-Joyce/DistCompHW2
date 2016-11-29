@@ -310,7 +310,7 @@ public class ZooKeeperNode implements AutoCloseable {
     setCurrentTimestamp(currentTimestamp.nextCounterTimestamp());
     final int[] quorum = {0};
     StampedLock quorumLock = new StampedLock();
-    logWriter.write(receivedTimestamp.toString() + " " + String.join(" ", message) + "\n");
+    logWriter.write(currentTimestamp.toString() + " " + String.join(" ", message) + "\n");
     //Spin up threads to repeatedly attempt to communicate with each follower
     //Thought about using parallel stream but that has a hard limit on the threadpool which could cause problems
     otherNodeAddresses.values().forEach(a -> pool.execute(() -> {
