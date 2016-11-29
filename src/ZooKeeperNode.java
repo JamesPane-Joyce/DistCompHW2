@@ -7,8 +7,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.locks.StampedLock;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * A node in the ZooKeeper Algorithm.
@@ -207,9 +205,7 @@ public class ZooKeeperNode implements AutoCloseable {
     });
     //Hang construction until we've received all connections from the other ZooKeeperNodes.
     while (otherNodeAddresses.size() < addressList.size() - 1) {
-      try {
-        Thread.sleep(100);
-      } catch (InterruptedException ignored) {}
+      safeSleep(100);
     }
   }
 
@@ -290,9 +286,7 @@ public class ZooKeeperNode implements AutoCloseable {
     if (!shouldDie) return;
     for (int i = 0; i < 10; i++) {
       if (consoleMessageQueue.isEmpty()) System.exit(-1);
-      try {
-        Thread.sleep(100);
-      } catch (InterruptedException ignored) {}
+      safeSleep(100);
     }
     System.exit(-1);
   }
@@ -314,54 +308,56 @@ public class ZooKeeperNode implements AutoCloseable {
    */
   private synchronized void leaderBroadcast(String message[]) throws IOException {
     setCurrentTimestamp(currentTimestamp.nextCounterTimestamp());
-    List<SocketInOutTriple> sockets = otherNodeAddresses.values().parallelStream().
-      flatMap(a -> {
-        try {
-          SocketInOutTriple out = new SocketInOutTriple(new Socket(a, INTER_NODE_COMM_PORT));
-          return Stream.of(out);
-        } catch (IOException e) {
-          return Stream.empty();
-        }
-      }).
-      filter(s -> {
-        try {
-          s.blockingSendMessage(ID + "");
-          s.blockingSendMessage(PROPOSE);
-          s.out.writeObject(currentTimestamp);
-          s.blockingSendMessage(message);
-          return true;
-        } catch (IOException e) {
-          return false;
-        }
-      }).collect(Collectors.toList());
-    append(message[1], String.join(" ", message).substring(message[0].length() + message[1].length() + 2));
     final int[] quorum = {0};
     StampedLock quorumLock = new StampedLock();
-    sockets.forEach(s -> pool.execute(() -> {
-      try {
-        s.blockingRecvMessage();
-        if (quorum[0] < (otherNodeAddresses.size() - 1) / 2) {
-          long lock = quorumLock.writeLock();
+    append(message[1], String.join(" ", message).substring(message[0].length() + message[1].length() + 2));
+    //Spin up threads to repeatedly attempt to communicate with each follower
+    //Thought about using parallel stream but that has a hard limit on the threadpool which could cause problems
+    otherNodeAddresses.values().forEach(a -> pool.execute(() -> {
+      while (true) {
+        long lock = quorumLock.readLock();
+        if (quorum[0] > (otherNodeAddresses.size() + 1) / 2) {
+          quorumLock.unlockRead(lock);
+          break;
+        }
+        try (SocketInOutTriple connection = new SocketInOutTriple(new Socket(a, INTER_NODE_COMM_PORT))) {
+          connection.blockingSendMessage(ID + "");
+          connection.blockingSendMessage(PROPOSE);
+          connection.out.writeObject(currentTimestamp);
+          connection.blockingSendMessage(message);
+          connection.blockingRecvMessage();
+          lock = quorumLock.writeLock();
           ++quorum[0];
           quorumLock.unlockWrite(lock);
+          while (true) {
+            lock = quorumLock.readLock();
+            if (quorum[0] > (otherNodeAddresses.size() + 1) / 2) {
+              quorumLock.unlockRead(lock);
+              break;
+            }
+          }
+          connection.blockingSendMessage(COMMIT);
+        } catch (IOException | ClassNotFoundException ignored) {
+          safeSleep(500);
+          continue;
         }
-      } catch (IOException | ClassNotFoundException ignored) {}
+        break;
+      }
     }));
-    while (quorum[0] < sockets.size() / 2) {
-      try {
-        Thread.sleep(100);
-      } catch (InterruptedException ignored) {}
+    //Block this thread while we wait for the quorum to be achieved
+    while (true) {
+      long lock = quorumLock.readLock();
+      if (quorum[0] > (otherNodeAddresses.size() + 1) / 2) {
+        quorumLock.unlockRead(lock);
+        break;
+      }
     }
-    sockets.forEach(s -> {
-      try {
-        s.blockingSendMessage(COMMIT);
-      } catch (IOException ignored) {}
-    });
     while (currentTimestamp.epoch > newestDeliveredTimestamp.epoch &&
       !(currentTimestamp.epoch - 1 == newestDeliveredTimestamp.epoch && currentTimestamp.counter == 0
         && newestDeliveredTimestamp.counter == newestTimestampsInEpoch.getOrDefault(newestDeliveredTimestamp.epoch, newestDeliveredTimestamp).counter)) {
-      try {Thread.sleep(100);} catch (InterruptedException ignored) {}
+      safeSleep(100);
     }
+    newestDeliveredTimestamp = currentTimestamp;
     switch (message[0]) {
       case CREATE_FILE_COMMAND:
         create(message[1]);
@@ -373,6 +369,10 @@ public class ZooKeeperNode implements AutoCloseable {
         delete(message[1]);
         break;
     }
+  }
+
+  private static void safeSleep(int millis) {
+    try {Thread.sleep(millis);} catch (InterruptedException e) {}
   }
 
   /**
@@ -390,7 +390,7 @@ public class ZooKeeperNode implements AutoCloseable {
     while (currentTimestamp.epoch > newestDeliveredTimestamp.epoch &&
       !(currentTimestamp.epoch - 1 == newestDeliveredTimestamp.epoch && currentTimestamp.counter == 0
         && newestDeliveredTimestamp.counter == newestTimestampsInEpoch.getOrDefault(newestDeliveredTimestamp.epoch, newestDeliveredTimestamp).counter)) {
-      try {Thread.sleep(100);} catch (InterruptedException ignored) {}
+      safeSleep(100);
     }
     switch (message[0]) {
       case CREATE_FILE_COMMAND:
@@ -462,7 +462,7 @@ public class ZooKeeperNode implements AutoCloseable {
       try (ZooKeeperNode keeper = new ZooKeeperNode(new File(args[0]), new File(args[0]))) {
         //Take half second sleeps until the zookeeper dies.
         while (keeper.running) {
-          try {Thread.sleep(500);} catch (InterruptedException ignored) {}
+          safeSleep(500);
         }
       } catch (IOException e) {
         e.printStackTrace();
