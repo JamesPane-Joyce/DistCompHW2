@@ -1,5 +1,3 @@
-import org.jetbrains.annotations.NotNull;
-
 import java.io.*;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -15,39 +13,8 @@ import java.util.stream.Stream;
 /**
  * A node in the ZooKeeper Algorithm.
  */
-@SuppressWarnings({"WeakerAccess"})
+@SuppressWarnings({"WeakerAccess", "FieldCanBeLocal"})
 public class ZooKeeperNode implements AutoCloseable {
-  private class TimeStamp implements Serializable, Comparable<TimeStamp> {
-    final int epoch;
-    final int counter;
-
-    private TimeStamp(int epoch, int counter) {
-      this.epoch = epoch;
-      this.counter = counter;
-    }
-
-    @Override
-    public int compareTo(@NotNull TimeStamp o) {
-      if (epoch == o.epoch) {
-        return Integer.compare(counter, o.counter);
-      }
-      return Integer.compare(epoch, o.epoch);
-    }
-
-    @Override
-    public boolean equals(Object o) {
-      if (this == o) return true;
-      if (o == null || getClass() != o.getClass()) return false;
-      TimeStamp timeStamp = (TimeStamp) o;
-      return epoch == timeStamp.epoch && counter == timeStamp.counter;
-    }
-
-    @Override
-    public int hashCode() {
-      return 31 * epoch + counter;
-    }
-  }
-
   /**
    * Boolean that is true while this node in a ZooKeeperNode algorithm has not crashed.
    */
@@ -56,39 +23,25 @@ public class ZooKeeperNode implements AutoCloseable {
    * Pool of executors that all local ZooKeeperNodes use to preform jobs.
    */
   private static final ExecutorService pool = Executors.newCachedThreadPool();
-  /**
-   * Port that all ZooKeeperNodes use for setup communications.
-   */
+  /** Port that all ZooKeeperNodes use for setup communications. */
   public static final int INTER_NODE_SETUP_PORT = HW2Console.PORT + 255;
   /** Port that all ZooKeeperNodes use for runtime communications. */
   public static final int INTER_NODE_COMM_PORT = INTER_NODE_SETUP_PORT + 255;
-  /**
-   * String sent from the console or read from the log that says to create a file.
-   */
+  /** String sent from the console or read from the log that says to create a file. */
   public static final String CREATE_FILE_COMMAND = "CREATE";
-  /**
-   * String sent from the console or read from the log that says to create a file.
-   */
+  /** String sent from the console or read from the log that says to create a file. */
   public static final String DELETE_FILE_COMMAND = "DELETE";
   /** String sent from the console that says to create a file. */
   public static final String SERVER_READ_FILE_MESSAGE = "READ";
-  /**
-   * String sent from the console or read from the log that says to create a file.
-   */
+  /** String sent from the console or read from the log that says to create a file. */
   public static final String APPEND_FILE_COMMAND = "APPEND_FILE_COMMAND";
   /** String sent from the console that says to kill this node. */
   public static final String SERVER_END_ZOOKEEPER = "EXIT";
-  /**
-   * String sent from the leader indicating that a broadcast is about to be received.
-   */
+  /** * String sent from the leader indicating that a broadcast is about to be received. */
   public static final String PROPOSE = "PROPOSE";
-  /**
-   * String sent from a follower to the reader indicating that a proposal has bee been received.
-   */
+  /** String sent from a follower to the reader indicating that a proposal has bee been received. */
   public static final String ACK = "ACK";
-  /** String sent from one ZooKeeperNode to another indicating that a vote reached an abort consensus. */
-  public static final String ABORT = "ABORT";
-  /** String sent from one ZooKeeperNode to another indicating that a vote reached an commit consensus. */
+  /** String sent from a leader to all followers to another indicating that a proposal has finished. */
   public static final String COMMIT = "COMMIT";
   /** Map containing all the current contents of all tokens. */
   public final HashMap<String, String> tokenContents = new HashMap<>();
@@ -96,19 +49,13 @@ public class ZooKeeperNode implements AutoCloseable {
   public final List<AsyncSocketInOutTriple> consoleConnections = Collections.synchronizedList(new ArrayList<>());
   /** The identification of this ZooKeeperNode. */
   private final int ID;
-  /**
-   * The address that this ZooKeeperNode can be found at.
-   */
+  /** The address that this ZooKeeperNode can be found at. */
   private final InetAddress selfAddress;
   /** Queue of messages to be sent to the connected consoles. */
   private final LinkedTransferQueue<String> consoleMessageQueue = new LinkedTransferQueue<>();
-  /**
-   * Map to the addresses of every other ZooKeeperNode.
-   */
+  /** Map to the addresses of every other ZooKeeperNode. */
   private final HashMap<Integer, InetAddress> otherNodeAddresses = new HashMap<>();
-  /**
-   * Thread that sets up a ServerSocket accepting messages from the consoles and that starts processing them.
-   */
+  /** Thread that sets up a ServerSocket accepting messages from the consoles and that starts processing them. */
   private final Runnable incomingConsoleMessageThread = () -> {
     try (ServerSocket consoleServer = new ServerSocket(HW2Console.PORT)) {
       while (running) {
@@ -139,9 +86,7 @@ public class ZooKeeperNode implements AutoCloseable {
       handleConsoleOutput(e, true);
     }
   };
-  /**
-   * Thread that sets up a ServerSocket accepting messages other ZooKeeperNodes that are starting up.
-   */
+  /** Thread that sets up a ServerSocket accepting messages other ZooKeeperNodes that are starting up. */
   private final Runnable incomingStartupMessageThread = () -> {
     while (running) {
       try {
@@ -160,9 +105,7 @@ public class ZooKeeperNode implements AutoCloseable {
       } catch (InterruptedException ignored) {}
     }
   };
-  /**
-   * Thread that accepts messages from foreign ZooKeeperNodes.
-   */
+  /** Thread that accepts messages from foreign ZooKeeperNodes. */
   private final Runnable interNodeCommunicationAcceptor = () -> {
     try (ServerSocket server = new ServerSocket(INTER_NODE_COMM_PORT)) {
       while (running) {
@@ -185,15 +128,22 @@ public class ZooKeeperNode implements AutoCloseable {
     }
   };
 
-  /**
-   * The writer that goes to the log.
-   */
+  /** The writer that goes to the log. */
   private final BufferedWriter logWriter;
 
-  private int newestDeliveredEpoch = 0;
-  private int newestDeliveredCounter = 0;
-  private int currentEpoch = 0;
-  private int currentCounter = 0;
+  /**
+   * The Timestamp of the most recent delivered command.
+   */
+  private Timestamp newestDeliveredTimestamp = new Timestamp(0, -1);
+  /**
+   * The Timestamp of the current command. Incremented when a leader sends out the call or the call is received.
+   */
+  private Timestamp currentTimestamp = new Timestamp(0, -1);
+  /**
+   * A map of the most recent Timestamp seen within each epoch, given that they'll have different lengths and we need
+   * to block based on the most recently delivered one.
+   */
+  private HashMap<Integer, Timestamp> newestTimestampsInEpoch = new HashMap<>();
 
   /**
    * Create a ZooKeeperNode on this computer which will run until it's told to crash.
@@ -346,6 +296,7 @@ public class ZooKeeperNode implements AutoCloseable {
    * @throws IOException If everything worked out, commit was chosen, but writing to log broke.
    */
   private synchronized void leaderBroadcast(String message[]) throws IOException {
+    setCurrentTimestamp(currentTimestamp.nextCounterTimestamp());
     List<SocketInOutTriple> sockets = otherNodeAddresses.values().parallelStream().
       flatMap(a -> {
         try {
@@ -359,8 +310,7 @@ public class ZooKeeperNode implements AutoCloseable {
         try {
           s.blockingSendMessage(ID + "");
           s.blockingSendMessage(PROPOSE);
-          s.out.writeObject(currentEpoch);
-          s.out.writeObject(++currentCounter);
+          s.out.writeObject(currentTimestamp);
           s.blockingSendMessage(message);
           return true;
         } catch (IOException e) {
@@ -390,11 +340,11 @@ public class ZooKeeperNode implements AutoCloseable {
         s.blockingSendMessage(COMMIT);
       } catch (IOException ignored) {}
     });
-    while (newestDeliveredEpoch < currentEpoch - 1 || newestDeliveredCounter < currentCounter - 1) {
+    while (currentTimestamp.epoch > newestDeliveredTimestamp.epoch &&
+      !(currentTimestamp.epoch - 1 == newestDeliveredTimestamp.epoch && currentTimestamp.counter == 0
+        && newestDeliveredTimestamp.counter == newestTimestampsInEpoch.getOrDefault(newestDeliveredTimestamp.epoch, newestDeliveredTimestamp).counter)) {
       try {Thread.sleep(100);} catch (InterruptedException ignored) {}
     }
-    newestDeliveredEpoch = currentEpoch;
-    newestDeliveredCounter = currentCounter;
     switch (message[0]) {
       case CREATE_FILE_COMMAND:
         create(message[1]);
@@ -414,17 +364,17 @@ public class ZooKeeperNode implements AutoCloseable {
    * @param connection The connection to talk back to the leader.
    */
   private synchronized void followerBroadcastResponse(SocketInOutTriple connection) throws IOException, ClassNotFoundException {
-    int receivedEpoch = (int) connection.in.readObject();
-    int receivedCounter = (int) connection.in.readObject();
+    setCurrentTimestamp((Timestamp) connection.in.readObject());
+
     String[] message = connection.blockingRecvMessage();
     logWriter.write(String.join(" ", message) + "\n");
     connection.blockingSendMessage(ACK);
     connection.blockingRecvMessage();
-    while (newestDeliveredEpoch < receivedEpoch - 1 || newestDeliveredCounter < receivedCounter - 1) {
+    while (currentTimestamp.epoch > newestDeliveredTimestamp.epoch &&
+      !(currentTimestamp.epoch - 1 == newestDeliveredTimestamp.epoch && currentTimestamp.counter == 0
+        && newestDeliveredTimestamp.counter == newestTimestampsInEpoch.getOrDefault(newestDeliveredTimestamp.epoch, newestDeliveredTimestamp).counter)) {
       try {Thread.sleep(100);} catch (InterruptedException ignored) {}
     }
-    newestDeliveredEpoch = receivedEpoch;
-    newestDeliveredCounter = receivedCounter;
     switch (message[0]) {
       case CREATE_FILE_COMMAND:
         create(message[1]);
@@ -436,6 +386,11 @@ public class ZooKeeperNode implements AutoCloseable {
         delete(message[1]);
         break;
     }
+  }
+
+  private void setCurrentTimestamp(Timestamp timestamp) {
+    newestTimestampsInEpoch.compute(timestamp.epoch, (k, v) -> v == null || v.counter < timestamp.counter ? timestamp : v);
+    currentTimestamp = timestamp;
   }
 
   /**
