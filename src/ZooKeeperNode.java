@@ -310,7 +310,7 @@ public class ZooKeeperNode implements AutoCloseable {
     setCurrentTimestamp(currentTimestamp.nextCounterTimestamp());
     final int[] quorum = {0};
     StampedLock quorumLock = new StampedLock();
-    append(message[1], String.join(" ", message).substring(message[0].length() + message[1].length() + 2));
+    logWriter.write(receivedTimestamp.toString() + " " + String.join(" ", message) + "\n");
     //Spin up threads to repeatedly attempt to communicate with each follower
     //Thought about using parallel stream but that has a hard limit on the threadpool which could cause problems
     otherNodeAddresses.values().forEach(a -> pool.execute(() -> {
@@ -381,17 +381,19 @@ public class ZooKeeperNode implements AutoCloseable {
    * @param connection The connection to talk back to the leader.
    */
   private synchronized void followerBroadcastResponse(SocketInOutTriple connection) throws IOException, ClassNotFoundException {
-    setCurrentTimestamp((Timestamp) connection.in.readObject());
+    Timestamp receivedTimestamp = (Timestamp) connection.in.readObject();
+    setCurrentTimestamp(receivedTimestamp);
 
     String[] message = connection.blockingRecvMessage();
-    logWriter.write(currentTimestamp.toString() + " " + String.join(" ", message) + "\n");
+    logWriter.write(receivedTimestamp.toString() + " " + String.join(" ", message) + "\n");
     connection.blockingSendMessage(ACK);
     connection.blockingRecvMessage();
-    while (currentTimestamp.epoch > newestDeliveredTimestamp.epoch &&
-      !(currentTimestamp.epoch - 1 == newestDeliveredTimestamp.epoch && currentTimestamp.counter == 0
+    while (receivedTimestamp.epoch > newestDeliveredTimestamp.epoch &&
+      !(receivedTimestamp.epoch - 1 == newestDeliveredTimestamp.epoch && receivedTimestamp.counter == 0
         && newestDeliveredTimestamp.counter == newestTimestampsInEpoch.getOrDefault(newestDeliveredTimestamp.epoch, newestDeliveredTimestamp).counter)) {
       safeSleep(100);
     }
+    newestDeliveredTimestamp = receivedTimestamp;
     switch (message[0]) {
       case CREATE_FILE_COMMAND:
         create(message[1]);
