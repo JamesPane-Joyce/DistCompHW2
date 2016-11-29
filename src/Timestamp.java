@@ -3,7 +3,7 @@ import org.jetbrains.annotations.NotNull;
 import java.io.Serializable;
 
 /**
- * Small immutable class for containing a timestamp
+ * Small immutable class for containing a timestamp that can be sorted, serialized, and hashed.
  */
 @SuppressWarnings("ALL")
 public class Timestamp implements Serializable, Comparable<Timestamp> {

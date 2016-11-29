@@ -13,7 +13,7 @@ public class NodeWindow {
   private JScrollPane scroll;
   private final StringBuilder text = new StringBuilder("Hello. Acceptable commands are create, delete, read, append, and exit.\n");
 
-  public NodeWindow(NodeConnection connection) {
+  public NodeWindow(NodeConsole connection) {
     outputPane.setText(text.toString());
     sendButton.addActionListener(e -> {
       String message = inputPane.getText().trim();

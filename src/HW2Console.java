@@ -8,7 +8,7 @@ import java.util.HashMap;
 import java.util.Scanner;
 
 /**
- * Small command line script for connecting to Amazon EC2 for the first homework.
+ * Small command line script for connecting to Amazon EC2 for the second homework.
  * <p>
  * Requires appropriate credentials in the ~/.aws/credentials file
  * <p>
@@ -23,18 +23,18 @@ public abstract class HW2Console {
       System.err.println("usage: HW2Console ip_addresses.txt");
     }
     HashMap<String, InetAddress> serverLocationMap = readAddressFile(args[0]);
-    ArrayList<NodeConnection> connections = new ArrayList<>();
+    ArrayList<NodeConsole> connections = new ArrayList<>();
     try {
       System.out.println("Enter the name of a server to establish a client.\n" +
         "If told to exit or quit this console and all local activity will end.");
       Scanner scanner = new Scanner(System.in);
       String line;
-      while (!(line = scanner.nextLine()).equalsIgnoreCase("exit") && !line.equalsIgnoreCase("quit")) {
+      while (!(line = scanner.nextLine().trim()).equalsIgnoreCase("exit") && !line.equalsIgnoreCase("quit")) {
         if (!serverLocationMap.containsKey(line)) {
           System.out.println("There is no server named \"" + line + "\"");
         } else {
           try {
-            connections.add(new NodeConnection(line, serverLocationMap.get(line)));
+            connections.add(new NodeConsole(line, serverLocationMap.get(line)));
           } catch (IOException | ClassNotFoundException e) {
             e.printStackTrace();
             System.err.println("THERE WAS AN ERROR IN ESTABLISHING A NEW CONNECTION TO SERVER \"" + line + "\" " + serverLocationMap.get(line));
@@ -46,8 +46,14 @@ public abstract class HW2Console {
     }
   }
 
-  public static HashMap<String, InetAddress> readAddressFile(String fileLocation) {
-    File ipAddressesFile = new File(fileLocation);
+  /**
+   * Read the file at the given location, each line of which is the name of a node followed by a space, and then the IP
+   * address of that node.
+   * @param addressLocation The String of the path to the ipAddressesFile.
+   * @return A HashMap from the names of nodes to their InetAddresses.
+   */
+  public static HashMap<String, InetAddress> readAddressFile(String addressLocation) {
+    File ipAddressesFile = new File(addressLocation);
     HashMap<String, InetAddress> nameAddressMap = new HashMap<>();
     try (BufferedReader ipAddressesFileReader = new BufferedReader(new FileReader(ipAddressesFile))) {
       String line;

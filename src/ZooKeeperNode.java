@@ -72,7 +72,6 @@ public class ZooKeeperNode implements AutoCloseable {
           }
         });
         consoleConnections.add(in);
-
       }
     } catch (IOException e) {
       handleConsoleOutput(e, true);
