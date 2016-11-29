@@ -2,7 +2,9 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.List;
+import java.util.AbstractMap;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BooleanSupplier;
@@ -22,13 +24,20 @@ public interface ElectionManager {
   boolean initiateElection();
   /** Return the leader's ID. */
   default int getLeaderID(){return "DONALD TRUMP".hashCode();}
-  /** Return the Epoch */
-  int getEpoch();
+  /** Return the leader's most recent delivered Timestamp */
+  Timestamp getTimestamp();
+  /** Return an ordered map of messages that have been delivered by the leader */
+  TreeMap<Timestamp,String[]> getLeaderHisTree();
 
 
   class Bully implements ElectionManager{
     private static final String START_ELECTION="START_ELECTION";
+    private static final String PING="PING";
+    private static final String NEXT="NEXT";
+    private static final String END="END";
     private static final String LATEST_DELIVERED_TIMESTAMP_REQUEST="LATEST_DELIVERED_TIMESTAMP_REQUEST";
+    private static final String WHAT_TIMESTAMP_IS_IT = "WHAT_TIMESTAMP_IS_IT";
+    private static final String GET_LEADER_HISTORY_TREE = "GET_LEADER_HISTORY_TREE";
     private static final String OK="OK";
     /** Pool of executors that all local Bullies use to preform jobs. */
     private static final ExecutorService pool = Executors.newCachedThreadPool();
@@ -36,12 +45,18 @@ public interface ElectionManager {
     public static final int ELECTION_PORT = ZooKeeperNode.INTER_NODE_COMM_PORT + 255;
     private int leader=-1;
     private boolean holdingElection=false;
-    private final List<InetAddress> otherNodes;
+    private final Map<Integer,InetAddress> otherNodes;
     private final int selfID;
-    Supplier<Timestamp> getLastTimestampDelivered;
-    public Bully(List<InetAddress> otherNodes, int selfID, Supplier<Timestamp> getLastTimestampDelivered, BooleanSupplier isDone){
+    private final Supplier<Timestamp> getLastTimestampDeliveredLocally;
+    private final Supplier<TreeMap<Timestamp,String[]>> getLocalHisTree;
+    private SocketInOutTriple pingLeader;
+    public Bully(Map<Integer,InetAddress> otherNodes, int selfID,
+                 Supplier<Timestamp> getLastTimestampDeliveredLocally, BooleanSupplier isDone,
+                 Supplier<TreeMap<Timestamp,String[]>> getLocalHisTree){
       this.otherNodes=otherNodes;
       this.selfID=selfID;
+      this.getLastTimestampDeliveredLocally=getLastTimestampDeliveredLocally;
+      this.getLocalHisTree=getLocalHisTree;
       pool.execute(()->{
         try(ServerSocket server=new ServerSocket(ELECTION_PORT)) {
           while (!isDone.getAsBoolean()) {
@@ -51,8 +66,7 @@ public interface ElectionManager {
                 String message[] = connection.blockingRecvMessage();
                 switch (message[0]) {
                   case LATEST_DELIVERED_TIMESTAMP_REQUEST: {
-                    connection.out.writeObject(getLastTimestampDelivered.get());
-                    connection.out.writeObject(selfID);
+                    connection.out.writeObject(getLastTimestampDeliveredLocally.get());
                     connection.out.flush();
                     connection.blockingRecvMessage();
                     connection.blockingSendMessage(OK);
@@ -62,7 +76,31 @@ public interface ElectionManager {
                         connection.out.flush();
                       }
                     }
+                    connection.close();
                     break;
+                  }case PING:{
+                    while(leader==selfID){
+                      connection.blockingSendMessage(PING);
+                      if(leader!=selfID) break;
+                      connection.blockingRecvMessage();
+                    }
+                    connection.close();
+                    break;
+                  }case WHAT_TIMESTAMP_IS_IT:{
+                    connection.out.writeObject(getLastTimestampDeliveredLocally.get());
+                    connection.out.flush();
+                    connection.close();
+                    break;
+                  }case GET_LEADER_HISTORY_TREE:{
+                    TreeMap<Timestamp, String[]> timestampTreeMap = getLocalHisTree.get();
+                    timestampTreeMap.forEach((k,v)->{
+                      try {
+                        connection.blockingSendMessage(NEXT);
+                        connection.out.writeObject(k);
+                        connection.blockingSendMessage(v);
+                      } catch (IOException ignored) {}
+                    });
+                    connection.blockingSendMessage(END);
                   }
                 }
               }catch (Exception ignored){}
@@ -79,25 +117,25 @@ public interface ElectionManager {
     @Override
     public boolean initiateElection() {
       holdingElection=true;
-      Timestamp timestamp = getLastTimestampDelivered.get();
-      int coordinator=otherNodes.stream().
-        flatMap(a -> {
+      Timestamp timestamp = getLastTimestampDeliveredLocally.get();
+      int coordinator=otherNodes.entrySet().stream().
+        flatMap(e -> {
           if(!holdingElection) return Stream.empty();
           try {
-            return Stream.of(new SocketInOutTriple(new Socket(a, ELECTION_PORT)));
-          } catch (IOException e) {
+            return Stream.of(new AbstractMap.SimpleEntry<>(e.getKey(),new SocketInOutTriple(new Socket(e.getValue(), ELECTION_PORT))));
+          } catch (IOException ignored) {
             return Stream.empty();
           }
         }).
-        flatMap(connection->{
+        flatMap(e->{
           if(!holdingElection) return Stream.empty();
           try {
-            connection.blockingSendMessage(LATEST_DELIVERED_TIMESTAMP_REQUEST);
+            e.getValue().blockingSendMessage(LATEST_DELIVERED_TIMESTAMP_REQUEST);
             if(!holdingElection) return Stream.empty();
-            if(timestamp.compareTo((Timestamp)connection.in.readObject())<-1){
-              if(selfID<(int)connection.in.readObject()) {
+            if(timestamp.compareTo((Timestamp)e.getValue().in.readObject())<-1){
+              if(selfID<e.getKey()) {
                 if (!holdingElection) return Stream.empty();
-                return Stream.of(connection);
+                return Stream.of(e.getValue());
               }
             }
           } catch (IOException | ClassNotFoundException ignored) {}
@@ -124,12 +162,45 @@ public interface ElectionManager {
     }
 
     public int getLeaderID(){
+      if(leader==selfID) return leader;
+      try {
+        if(pingLeader==null){
+          pingLeader=new SocketInOutTriple(new Socket(otherNodes.get(leader),ELECTION_PORT));
+        }
+        pingLeader.blockingSendMessage(PING);
+        pingLeader.blockingRecvMessage();
+      } catch (ClassNotFoundException|IOException ignored) {
+        pingLeader=null;
+        initiateElection();
+        return getLeaderID();
+      }
       return leader;
     }
 
     @Override
-    public int getEpoch() {
-      return 0;
+    public Timestamp getTimestamp() {
+      if(leader==selfID) return getLastTimestampDeliveredLocally.get();
+      try(SocketInOutTriple connection=new SocketInOutTriple(new Socket(otherNodes.get(getLeaderID()),ELECTION_PORT))){
+        connection.blockingSendMessage(WHAT_TIMESTAMP_IS_IT);
+        return (Timestamp) connection.in.readObject();
+      } catch (ClassNotFoundException|IOException ignored) {
+        return getTimestamp();
+      }
+    }
+
+    @Override
+    public TreeMap<Timestamp, String[]> getLeaderHisTree() {
+      if(leader==selfID) return getLocalHisTree.get();
+      try(SocketInOutTriple connection=new SocketInOutTriple(new Socket(otherNodes.get(getLeaderID()),ELECTION_PORT))){
+        connection.blockingSendMessage(GET_LEADER_HISTORY_TREE);
+        TreeMap<Timestamp,String[]> hisTree=new TreeMap<>();
+        while(connection.blockingRecvMessage()[0].endsWith(NEXT)){
+          hisTree.put((Timestamp) connection.in.readObject(),connection.blockingRecvMessage());
+        }
+        return hisTree;
+      } catch (ClassNotFoundException|IOException ignored) {
+        return getLeaderHisTree();
+      }
     }
   }
 }
