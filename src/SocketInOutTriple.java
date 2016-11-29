@@ -70,7 +70,7 @@ public class SocketInOutTriple implements AutoCloseable {
    * @return The message received, null if this was closed during the receive.
    * @throws IOException Any errors that occurred during receiving.
    */
-  public synchronized String[] blockingRecvMessage() throws IOException, ClassNotFoundException {
+  public String[] blockingRecvMessage() throws IOException, ClassNotFoundException {
     if (!open) {
       return null;
     }

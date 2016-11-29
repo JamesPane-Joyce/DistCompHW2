@@ -52,14 +52,14 @@ public class ConsumerBasedSocketInOutTriple extends SocketInOutTriple {
     this.messageConsumer = messageConsumer;
     this.throwableConsumer = throwableConsumer;
     pool.execute(() -> {
-      while (open) {
-        try {
+      try {
+        while (open) {
           String[] tmp = messageOutQueue.take();
           if(!open) break;
           blockingSendMessage(tmp);
-        } catch (Exception e) {
-          if(open) throwableConsumer.accept(e);
         }
+      } catch (Exception e) {
+        if(open) throwableConsumer.accept(e);
       }
       close();
     });
@@ -68,8 +68,7 @@ public class ConsumerBasedSocketInOutTriple extends SocketInOutTriple {
         String message[];
         while (open){
           message=blockingRecvMessage();
-          if(!open) break;
-          processMessage(message);
+          if(open)processMessage(message);
         }
       } catch (Exception e) {
         if(open) throwableConsumer.accept(e);
@@ -95,13 +94,15 @@ public class ConsumerBasedSocketInOutTriple extends SocketInOutTriple {
    * @param message The message to be inserted.
    * @return true if the message was non-null and actually processed.
    */
-  public synchronized boolean processMessage(String... message) {
+  public boolean processMessage(String... message) {
     if (message == null) return false;
-    if (open) {
-      try {
-        messageConsumer.accept(this,message);
-      } catch (Throwable t) {
-        throwableConsumer.accept(t);
+    synchronized (socket) {
+      if (open) {
+        try {
+          messageConsumer.accept(this, message);
+        } catch (Throwable t) {
+          throwableConsumer.accept(t);
+        }
       }
     }
     return open;

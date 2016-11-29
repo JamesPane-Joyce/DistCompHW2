@@ -63,9 +63,7 @@ public class NodeWindow {
                 display("Invalid Command.");
                 break;
             }
-          } catch (IOException ignored) {
-
-          }
+          } catch (IOException ignored) {}
         }
       }
     });

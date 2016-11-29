@@ -47,29 +47,44 @@ public class ZooKeeperNode implements AutoCloseable {
   private final LinkedTransferQueue<String> consoleMessageQueue = new LinkedTransferQueue<>();
   /** Map to the addresses of every other ZooKeeperNode. */
   private final TreeMap<Integer, InetAddress> otherNodeAddresses = new TreeMap<>();
+  /** The writer that goes to the log. */
+  private final BufferedWriter logWriter;
+  /** The Timestamp of the most recent delivered command. */
+  private Timestamp newestDeliveredTimestamp = new Timestamp(0, 0);
+  /** The Timestamp of the current command. Incremented when a leader sends out the call or the call is received. */
+  private Timestamp currentTimestamp = new Timestamp(0, 0);
   /** Thread that sets up a ServerSocket accepting messages from the consoles and that starts processing them. */
   private final Runnable incomingConsoleMessageThread = () -> {
     try (ServerSocket consoleServer = new ServerSocket(HW2Console.PORT)) {
       while (running) {
-        ConsumerBasedSocketInOutTriple in = new ConsumerBasedSocketInOutTriple(consoleServer.accept(), (message) -> {
+        ConsumerBasedSocketInOutTriple in = new ConsumerBasedSocketInOutTriple(consoleServer.accept(), (c,message) -> {
           if (message == null || message.length == 0) return;
+          handleConsoleOutput("Received a message from a console: "+Arrays.toString(message));
           if (message.length == 1 && (message[0].equals(SERVER_END_ZOOKEEPER))) {
+            handleConsoleOutput("Received a exit message, dieing now.");
             try { close(); } catch (Exception ignored) {}
           }
           while(true){
-            int leaderID = getElectionManager().getLeaderID();
             if(message[0].equals(SERVER_READ_FILE_MESSAGE)){
               read(message[1]);
-            }else if(leaderID== getID()) {
+            }
+            if(getElectionManager().isLeader()){
               leaderBroadcast(message);
             }else{
-              try(SocketInOutTriple connection=new SocketInOutTriple(new Socket(otherNodeAddresses.get(leaderID),INTER_NODE_COMM_PORT))){
-                connection.blockingSendMessage(message);
-                break;
+              int leaderID = getElectionManager().getLeaderID();
+              if(leaderID==getID()){
+                currentTimestamp=currentTimestamp.incrementEpoch();
+                leaderBroadcast(message);
+              }else{
+                try(SocketInOutTriple connection=new SocketInOutTriple(new Socket(otherNodeAddresses.get(leaderID),INTER_NODE_COMM_PORT))){
+                  connection.blockingSendMessage(message);
+                  break;
+                }
               }
             }
           }
-        });
+        }, (e)-> handleConsoleOutput("Connection to a console closed."));
+        handleConsoleOutput("Received a connection from a console.");
         consoleConnections.add(in);
       }
     } catch (IOException e) {
@@ -88,7 +103,7 @@ public class ZooKeeperNode implements AutoCloseable {
               consoleConnections.remove(i);
               --i;
             } else {
-              connection.processMessage(message);
+              connection.sendMessage(message);
             }
           }
         }
@@ -104,6 +119,7 @@ public class ZooKeeperNode implements AutoCloseable {
           new ConsumerBasedSocketInOutTriple(
             server.accept(),
             (c,message)-> {
+              handleConsoleOutput("Received a message from a another ZooKeeper: "+Arrays.toString(message));
               switch (message[0]) {
                 case PROPOSE: {
                   followerBroadcastResponse(c);
@@ -133,12 +149,6 @@ public class ZooKeeperNode implements AutoCloseable {
       handleConsoleOutput(e,true);
     }
   };
-  /** The writer that goes to the log. */
-  private final BufferedWriter logWriter;
-  /** The Timestamp of the most recent delivered command. */
-  private Timestamp newestDeliveredTimestamp = new Timestamp(0, -1);
-  /** The Timestamp of the current command. Incremented when a leader sends out the call or the call is received. */
-  private Timestamp currentTimestamp = new Timestamp(0, -1);
   /** A map of the most recent Timestamp seen within each epoch, given that they'll have different lengths and we need
    * to block based on the most recently delivered one. */
   private HashMap<Integer, Timestamp> newestTimestampsInEpoch = new HashMap<>();
@@ -178,13 +188,16 @@ public class ZooKeeperNode implements AutoCloseable {
     if (selfAddress == null) handleConsoleOutput(new RuntimeException("THIS NODE NEVER READ IT'S OWN ADDRESS."), true);
     handleConsoleOutput("Successfully read file \"" + ipAddresses.getName() + "\"");
     //Start up the election manager.
-    electionManager = new ElectionManager.BullyManager(otherNodeAddresses, ID, this::getNewestDeliveredTimestamp, this::isRunning, this::getLocalHisTree);
+    electionManager = new ElectionManager.BullyManager(otherNodeAddresses, ID,
+      this::getNewestDeliveredTimestamp, ()->!this.isRunning(),
+      this::getLocalHisTree,this::handleConsoleOutput);
     //Find out who the leader is
     int leader = electionManager.getLeaderID();
     //HisTree, get it? It's a pun!... yea maybe that's better in my head, but we're sticking with it.
     //If we are the leader read our own log for history. This only happens when nothing else has been started up and
     //there's stuff in the log.
     if (leader == ID) {
+      currentTimestamp=currentTimestamp.incrementEpoch();
       localHisTree = readOwnHisTree(log);
       executeHisTree(localHisTree);
       logWriter = new BufferedWriter(new FileWriter(log, true));
@@ -321,9 +334,9 @@ public class ZooKeeperNode implements AutoCloseable {
           break;
         }
         try (SocketInOutTriple connection = new SocketInOutTriple(new Socket(a, INTER_NODE_COMM_PORT))) {
-          connection.blockingSendMessage(ID + "");
-          connection.blockingSendMessage(PROPOSE);
-          connection.out.writeObject(currentTimestamp);
+          connection.blockingSendMessage(PROPOSE,ID+"", "["+String.join(" ",message)+"]");
+          handleConsoleOutput("Sending current Timestamp:"+currentTimestamp);
+          connection.blockingSendObject(currentTimestamp);
           connection.blockingSendMessage(message);
           connection.blockingRecvMessage();
           lock = quorumLock.writeLock();
@@ -457,11 +470,12 @@ public class ZooKeeperNode implements AutoCloseable {
   public static void main(String[] args) {
     if (args.length != 2) {
       System.err.println("usage: ZooKeeperNode.jar ip_addresses.txt log.txt");
+      System.exit(-1);
     }
     //Repeatedly create new Zookeepers.
     while (true) {
       //Create new zookeeper, if there is no ip addresses file exit yelling at the user.
-      try (ZooKeeperNode keeper = new ZooKeeperNode(new File(args[0]), new File(args[0]))) {
+      try (ZooKeeperNode keeper = new ZooKeeperNode(new File(args[0]), new File(args[1]))) {
         //Take half second sleeps until the zookeeper dies.
         while (keeper.running) {
           safeSleep(500);

@@ -8,6 +8,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -28,7 +29,7 @@ public interface ElectionManager {
    * Returns the ID of the leader or recurses forever.
    * @return The ID of the leader.
    */
-  default int getLeaderID(){return "DONALD TRUMP".hashCode();}
+  int getLeaderID();
 
   /**
    * Return an ordered map of messages that have been delivered by the leader.
@@ -37,6 +38,11 @@ public interface ElectionManager {
    * @return An ordered map of Timestamps to messages, earliest first.
    */
   TreeMap<Timestamp,String[]> getLeaderHisTree();
+
+  /**
+   * @return true if the current node is the current leader.
+   */
+  boolean isLeader();
 
   /**
    * A facsimile of the BullyManager Algorithm but uses TCP to loosen the need for timers .
@@ -73,6 +79,8 @@ public interface ElectionManager {
     private final Supplier<Timestamp> getLastTimestampDeliveredLocally;
     /** Supplier that returns an up to date history of delivered messages. */
     private final Supplier<TreeMap<Timestamp,String[]>> getLocalHisTree;
+    /** Consumer that will handle messages to be displayed. */
+    private final Consumer<String> messageConsumer;
     /** Socket being kept for pinging purposes. */
     private SocketInOutTriple pingLeader;
 
@@ -83,14 +91,17 @@ public interface ElectionManager {
      * @param getLastTimestampDeliveredLocally A supplier that gives the most recent timestamp that was delivered locally.
      * @param isDone A supplier that returns true when the owner of this BullyManager is done.
      * @param getLocalHisTree A supplier that gives a TreeMap representing Timestamps and their messages.
+     * @param messageConsumer A consumer that will handle messages to be displayed.
      */
     public BullyManager(Map<Integer,InetAddress> otherNodes, int selfID,
                         Supplier<Timestamp> getLastTimestampDeliveredLocally, BooleanSupplier isDone,
-                        Supplier<TreeMap<Timestamp,String[]>> getLocalHisTree){
+                        Supplier<TreeMap<Timestamp,String[]>> getLocalHisTree,
+                        Consumer<String> messageConsumer){
       this.otherNodes=otherNodes;
       this.selfID=selfID;
       this.getLastTimestampDeliveredLocally=getLastTimestampDeliveredLocally;
       this.getLocalHisTree=getLocalHisTree;
+      this.messageConsumer=messageConsumer;
       pool.execute(()->{
         try(ServerSocket server=new ServerSocket(ELECTION_PORT)) {
           while (!isDone.getAsBoolean()) {
@@ -104,7 +115,10 @@ public interface ElectionManager {
                     c.blockingRecvMessage();
                     c.blockingSendMessage(OK);
                     if (!holdingElection) {
-                      if (initiateElection()) {
+                      initiateElection();
+                      c.blockingSendObject(leader);
+                    }else{
+                      if(leader==selfID){
                         c.blockingSendObject(leader);
                       }
                     }
@@ -152,12 +166,16 @@ public interface ElectionManager {
     public boolean initiateElection() {
       holdingElection=true;
       Timestamp timestamp = getLastTimestampDeliveredLocally.get();
+      messageConsumer.accept("Beginning an election with local Timestamp: "+timestamp);
       int coordinator=otherNodes.entrySet().stream().
         flatMap(e -> {
           if(!holdingElection) return Stream.empty();
           try {
-            return Stream.of(new AbstractMap.SimpleEntry<>(e.getKey(),new SocketInOutTriple(new Socket(e.getValue(), ELECTION_PORT))));
+            Stream<AbstractMap.SimpleEntry<Integer, SocketInOutTriple>> tmp = Stream.of(new AbstractMap.SimpleEntry<>(e.getKey(), new SocketInOutTriple(new Socket(e.getValue(), ELECTION_PORT))));
+            messageConsumer.accept("Successfully contacted node "+e.getKey()+" in an election.");
+            return tmp;
           } catch (IOException ignored) {
+            messageConsumer.accept("Attempted to contact "+e.getKey()+" in an election but got error "+ignored.getLocalizedMessage());
             return Stream.empty();
           }
         }).
@@ -166,8 +184,13 @@ public interface ElectionManager {
           try {
             e.getValue().blockingSendMessage(LATEST_DELIVERED_TIMESTAMP_REQUEST);
             if(!holdingElection) return Stream.empty();
-            if(timestamp.compareTo((Timestamp)e.getValue().in.readObject())<-1){
+            Timestamp readTimestamp = (Timestamp) e.getValue().in.readObject();
+            if(timestamp.epoch==0&&timestamp.counter==0){
+              messageConsumer.accept("This node is in a state of recovery, so node "+e.getKey()+" has to be dragged into the election too.");
+              return Stream.of(e.getValue());
+            }else if(timestamp.compareTo(readTimestamp)<=0){
               if(selfID<e.getKey()) {
+                messageConsumer.accept(e.getKey()+" is a possible leader in an election as it has Timestamp: "+readTimestamp);
                 if (!holdingElection) return Stream.empty();
                 return Stream.of(e.getValue());
               }
@@ -182,13 +205,15 @@ public interface ElectionManager {
             if(!holdingElection) return Stream.empty();
             connection.blockingRecvMessage();
             if(!holdingElection) return Stream.empty();
+            Stream<Integer> tmp = Stream.of((int) connection.in.readObject());
             connection.close();
-            return Stream.of((int)connection.in.readObject());
+            return tmp;
           } catch (ClassNotFoundException|IOException ignored) {
             return Stream.empty();
           }
         }).findAny().orElse(selfID);
       if(holdingElection){
+        messageConsumer.accept("Finished an election with leader: "+coordinator);
         leader=coordinator;
         holdingElection=false;
       }
@@ -238,6 +263,11 @@ public interface ElectionManager {
       } catch (ClassNotFoundException|IOException ignored) {
         return getLeaderHisTree();
       }
+    }
+
+    @Override
+    public boolean isLeader() {
+      return selfID==leader;
     }
   }
 }

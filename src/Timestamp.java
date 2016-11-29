@@ -37,10 +37,14 @@ public class Timestamp implements Serializable, Comparable<Timestamp> {
   }
 
   public Timestamp nextCounterTimestamp() {
-    return new Timestamp(epoch, counter);
+    return new Timestamp(epoch, counter+1);
   }
 
   public String toString() {
     return epoch + " " + counter;
+  }
+
+  public Timestamp incrementEpoch() {
+    return new Timestamp(epoch+1,0);
   }
 }

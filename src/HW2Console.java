@@ -44,6 +44,7 @@ public abstract class HW2Console {
     } finally {
       connections.forEach(c -> {if (c.open()) c.close();});
     }
+    System.exit(0);
   }
 
   /**
@@ -57,10 +58,9 @@ public abstract class HW2Console {
     HashMap<String, InetAddress> nameAddressMap = new HashMap<>();
     try (BufferedReader ipAddressesFileReader = new BufferedReader(new FileReader(ipAddressesFile))) {
       String line;
-      String[] splitLine;
+      int ctr=0;
       while ((line = ipAddressesFileReader.readLine()) != null && !line.trim().equals("")) {
-        splitLine = line.split(" ");
-        nameAddressMap.put(splitLine[0], InetAddress.getByName(splitLine[1]));
+        nameAddressMap.put(""+ctr++, InetAddress.getByName(line));
       }
     } catch (Exception e) {
       e.printStackTrace();
