@@ -77,8 +77,8 @@ public class ZooKeeperNode implements AutoCloseable {
       handleConsoleOutput(e, true);
     }
   };
-  /** Thread that sets up a ServerSocket accepting messages from consoles that are starting up. */
-  private final Runnable incomingStartupMessageThread = () -> {
+  /** Thread sends messages in the queue for the consoles to each console and prints it. */
+  private final Runnable outgoingConsoleMessageQueue = () -> {
     while (running) {
       try {
         String message = consoleMessageQueue.take();
@@ -87,6 +87,7 @@ public class ZooKeeperNode implements AutoCloseable {
             ConsumerBasedSocketInOutTriple connection = consoleConnections.get(i);
             if (connection == null || !connection.isOpen()) {
               consoleConnections.remove(i);
+              --i;
             } else {
               connection.processMessage(message);
             }
@@ -100,28 +101,26 @@ public class ZooKeeperNode implements AutoCloseable {
   private final Runnable interNodeCommunicationAcceptor = () -> {
     try (ServerSocket server = new ServerSocket(INTER_NODE_COMM_PORT)) {
       while (running) {
-        try (SocketInOutTriple connection = new SocketInOutTriple(server.accept())) {
-          int otherNodeID = Integer.parseInt(connection.blockingRecvMessage()[0]);
-          String[] command = connection.blockingRecvMessage();
-          switch (command[0]) {
-            case PROPOSE: {
-              followerBroadcastResponse(connection);
-              break;
-            }
-            default: {
-              handleConsoleOutput(new RuntimeException("UNRECOGNIZED COMMAND FROM NODE " + otherNodeID + " \"" + Arrays.toString(command) + "\n"), true);
-            }
-          }
-        }
+        try {
+          new ConsumerBasedSocketInOutTriple(
+            server.accept(),
+            (connection,message)-> {
+              switch (message[0]) {
+                case PROPOSE: {
+                  followerBroadcastResponse(connection);
+                  break;
+                }
+              }
+            },
+            (e)->handleConsoleOutput(e,true));
+        } catch (IOException ignored) {}
       }
-    } catch (ClassNotFoundException | IOException e) {
-      handleConsoleOutput(e, true);
+    } catch (IOException e) {
+      handleConsoleOutput(e,true);
     }
   };
-
   /** The writer that goes to the log. */
   private final BufferedWriter logWriter;
-
   /** The Timestamp of the most recent delivered command. */
   private Timestamp newestDeliveredTimestamp = new Timestamp(0, -1);
   /** The Timestamp of the current command. Incremented when a leader sends out the call or the call is received. */
@@ -129,7 +128,9 @@ public class ZooKeeperNode implements AutoCloseable {
   /** A map of the most recent Timestamp seen within each epoch, given that they'll have different lengths and we need
    * to block based on the most recently delivered one. */
   private HashMap<Integer, Timestamp> newestTimestampsInEpoch = new HashMap<>();
+  /** The ElectionManager that handles all election mandated communication */
   private final ElectionManager electionManager;
+  /** The sorted Map representing all the history of delivered commands. */
   private final TreeMap<Timestamp, String[]> localHisTree;
 
   /**
@@ -140,6 +141,8 @@ public class ZooKeeperNode implements AutoCloseable {
    * @throws IOException Thrown if there is some error
    */
   public ZooKeeperNode(File ipAddresses, File log) throws IOException {
+    //Begin handling output.
+    pool.execute(outgoingConsoleMessageQueue);
     //Read each line from the ipAddresses file.
     BufferedReader addressReader = new BufferedReader(new FileReader(ipAddresses));
     String line = addressReader.readLine();
@@ -153,21 +156,27 @@ public class ZooKeeperNode implements AutoCloseable {
       if (ctr == ID) {
         ++ctr;
         tmp = InetAddress.getByName(line);
-        continue;
+      }else {
+        otherNodeAddresses.put(ctr++, InetAddress.getByName(line));
       }
-      otherNodeAddresses.put(ctr++, InetAddress.getByName(line));
     }
     selfAddress = tmp;
+    if (selfAddress == null) handleConsoleOutput(new RuntimeException("THIS NODE NEVER READ IT'S OWN ADDRESS."), true);
+    handleConsoleOutput("Successfully read file \"" + ipAddresses.getName() + "\"");
+    //Start up the election manager.
     electionManager = new ElectionManager.BullyManager(otherNodeAddresses, ID, this::getNewestDeliveredTimestamp, this::isRunning, this::getLocalHisTree);
+    //Find out who the leader is
     int leader = electionManager.getLeaderID();
     //HisTree, get it? It's a pun!... yea maybe that's better in my head, but we're sticking with it.
-    localHisTree = readOwnHisTree(log);
-    if (leader == ID || (localHisTree.lastKey() == electionManager.getTimestamp() && electionManager.getLeaderID() == leader)) {
+    //If we are the leader read our own log for history. This only happens when nothing else has been started up and
+    //there's stuff in the log.
+    if (leader == ID) {
+      localHisTree = readOwnHisTree(log);
       executeHisTree(localHisTree);
       logWriter = new BufferedWriter(new FileWriter(log, true));
     } else {
-      localHisTree.clear();
-      localHisTree.putAll(electionManager.getLeaderHisTree());
+      //Otherwise get the history of the leader and do it.
+      localHisTree=electionManager.getLeaderHisTree();
       logWriter = new BufferedWriter(new FileWriter(log, false));
       localHisTree.forEach((k, v) -> {
         try {
@@ -180,19 +189,15 @@ public class ZooKeeperNode implements AutoCloseable {
     }
     //Begin accepting commands from consoles.
     pool.execute(incomingConsoleMessageThread);
-    //Update this Node's state from the log file.
-    //Begin accepting commands from starting up ZooKeeperNodes.
-    pool.execute(incomingStartupMessageThread);
-    if (selfAddress == null) handleConsoleOutput(new RuntimeException("THIS NODE NEVER READ IT'S OWN ADDRESS."), true);
-    handleConsoleOutput("Successfully read file \"" + ipAddresses.getName() + "\"");
-    //Receive introductions to each ZooKeeperNode.
+    //Receive messages from each zookeeper.
     pool.execute(interNodeCommunicationAcceptor);
   }
 
   /**
-   * Given a log file, accept without question each command in the log.
+   * Given a log file, read and assemble a tree of commands.
    *
    * @param log The File being read from.
+   * @return The TreeMap of timestamps to messages.
    * @throws IOException Thrown if there is a problem reading the log.
    */
   private TreeMap<Timestamp, String[]> readOwnHisTree(File log) throws IOException {
@@ -260,7 +265,7 @@ public class ZooKeeperNode implements AutoCloseable {
    * @param e         The error being output.
    * @param shouldDie Whether this is a fatal error.
    */
-  public void handleConsoleOutput(Exception e, boolean shouldDie) {
+  public void handleConsoleOutput(Throwable e, boolean shouldDie) {
     StringWriter tmp = new StringWriter();
     e.printStackTrace(new PrintWriter(tmp));
     consoleMessageQueue.add(tmp.toString());

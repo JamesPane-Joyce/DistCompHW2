@@ -31,14 +31,6 @@ public interface ElectionManager {
   default int getLeaderID(){return "DONALD TRUMP".hashCode();}
 
   /**
-   * Return the leader's most recent delivered Timestamp.
-   * Sets up an election if there is no leader, or if a pinging of the leader fails.
-   * Returns the most recent delivered Timestamp of the leader or recurses forever.
-   * @return The most recent delivered Timestamp of the leader.
-   */
-  Timestamp getTimestamp();
-
-  /**
    * Return an ordered map of messages that have been delivered by the leader.
    * Sets up an election if there is no leader, or if a pinging of the leader fails.
    * Returns an ordered map of messages of the leader or recurses forever.
@@ -61,8 +53,6 @@ public interface ElectionManager {
     /** A String to be sent over indicating a request for the latest timestamp delivered on the other machine.
      * Really indicates interest in an Election. */
     private static final String LATEST_DELIVERED_TIMESTAMP_REQUEST="LATEST_DELIVERED_TIMESTAMP_REQUEST";
-    /** A String to be sent over indicating a request for the latest timestamp delivered on the other machine. Not part of the election. */
-    private static final String WHAT_TIMESTAMP_IS_IT = "WHAT_TIMESTAMP_IS_IT";
     /** A String to be sent over indicating a request for the history of delivered messages. */
     private static final String GET_LEADER_HISTORY_TREE = "GET_LEADER_HISTORY_TREE";
     /** A String to be sent over indicating the acknowledgement of and election*/
@@ -126,10 +116,6 @@ public interface ElectionManager {
                       if(leader!=selfID) break;
                       c.blockingRecvMessage();
                     }
-                    break;
-                  }case WHAT_TIMESTAMP_IS_IT:{
-                    //Just serve up the latest timestamp, used for recovery so the client gets to decide what to do after.
-                    c.blockingSendObject(getLastTimestampDeliveredLocally.get());
                     break;
                   }case GET_LEADER_HISTORY_TREE:{
                     //Send over the entire history of commands one a time.
@@ -230,23 +216,6 @@ public interface ElectionManager {
         return getLeaderID();
       }
       return leader;
-    }
-
-    /**
-     * Get the Timestamp of the most recently delivered message on the leader. If this node is the leader good, otherwise
-     * ping the leader, if the ping fails, start an election, then recurse with the new leader.
-     *
-     * @return The Timestamp of the most recently delivered message on the leader.
-     */
-    @Override
-    public Timestamp getTimestamp() {
-      if(leader==selfID) return getLastTimestampDeliveredLocally.get();
-      try(SocketInOutTriple connection=new SocketInOutTriple(new Socket(otherNodes.get(getLeaderID()),ELECTION_PORT))){
-        connection.blockingSendMessage(WHAT_TIMESTAMP_IS_IT);
-        return (Timestamp) connection.in.readObject();
-      } catch (ClassNotFoundException|IOException ignored) {
-        return getTimestamp();
-      }
     }
 
 
