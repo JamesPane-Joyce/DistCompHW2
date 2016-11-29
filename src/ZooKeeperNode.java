@@ -56,19 +56,18 @@ public class ZooKeeperNode implements AutoCloseable {
           if (message.length == 1 && (message[0].equals(SERVER_END_ZOOKEEPER))) {
             try { close(); } catch (Exception ignored) {}
           }
-          switch (message[0]) {
-            case CREATE_FILE_COMMAND:
-              create(message[1]);
-              break;
-            case DELETE_FILE_COMMAND:
-              delete(message[1]);
-              break;
-            case SERVER_READ_FILE_MESSAGE:
+          while(true){
+            int leaderID = getElectionManager().getLeaderID();
+            if(message[0].equals(SERVER_READ_FILE_MESSAGE)){
               read(message[1]);
-              break;
-            case APPEND_FILE_COMMAND:
-              append(message[1], String.join(" ", message).substring(message[0].length() + message[1].length() + 2));
-              break;
+            }else if(leaderID== getID()) {
+              leaderBroadcast(message);
+            }else{
+              try(SocketInOutTriple connection=new SocketInOutTriple(new Socket(otherNodeAddresses.get(leaderID),INTER_NODE_COMM_PORT))){
+                connection.blockingSendMessage(message);
+                break;
+              }
+            }
           }
         });
         consoleConnections.add(in);
@@ -104,10 +103,25 @@ public class ZooKeeperNode implements AutoCloseable {
         try {
           new ConsumerBasedSocketInOutTriple(
             server.accept(),
-            (connection,message)-> {
+            (c,message)-> {
               switch (message[0]) {
                 case PROPOSE: {
-                  followerBroadcastResponse(connection);
+                  followerBroadcastResponse(c);
+                  break;
+                }case CREATE_FILE_COMMAND:
+                case DELETE_FILE_COMMAND:
+                case APPEND_FILE_COMMAND: {
+                  while(true){
+                    int leaderID = getElectionManager().getLeaderID();
+                    if(leaderID== getID()) {
+                      leaderBroadcast(message);
+                    }else{
+                      try(SocketInOutTriple connection=new SocketInOutTriple(new Socket(otherNodeAddresses.get(leaderID),INTER_NODE_COMM_PORT))){
+                        connection.blockingSendMessage(message);
+                        break;
+                      }
+                    }
+                  }
                   break;
                 }
               }
@@ -481,5 +495,13 @@ public class ZooKeeperNode implements AutoCloseable {
 
   public TreeMap<Timestamp,String[]> getLocalHisTree() {
     return localHisTree;
+  }
+
+  public ElectionManager getElectionManager() {
+    return electionManager;
+  }
+
+  public int getID() {
+    return ID;
   }
 }
