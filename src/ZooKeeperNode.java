@@ -38,7 +38,7 @@ public class ZooKeeperNode implements AutoCloseable {
   /** Map containing all the current contents of all tokens. */
   public final HashMap<String, String> tokenContents = new HashMap<>();
   /** The list of all otherNodeAddresses that were open last time a message was sent out. */
-  public final List<AsyncSocketInOutTriple> consoleConnections = Collections.synchronizedList(new ArrayList<>());
+  public final List<ConsumerBasedSocketInOutTriple> consoleConnections = Collections.synchronizedList(new ArrayList<>());
   /** The identification of this ZooKeeperNode. */
   private final int ID;
   /** The address that this ZooKeeperNode can be found at. */
@@ -51,7 +51,7 @@ public class ZooKeeperNode implements AutoCloseable {
   private final Runnable incomingConsoleMessageThread = () -> {
     try (ServerSocket consoleServer = new ServerSocket(HW2Console.PORT)) {
       while (running) {
-        AsyncSocketInOutTriple in = new AsyncSocketInOutTriple(consoleServer.accept(), (message) -> {
+        ConsumerBasedSocketInOutTriple in = new ConsumerBasedSocketInOutTriple(consoleServer.accept(), (message) -> {
           if (message == null || message.length == 0) return;
           if (message.length == 1 && (message[0].equals(SERVER_END_ZOOKEEPER))) {
             try { close(); } catch (Exception ignored) {}
@@ -85,11 +85,11 @@ public class ZooKeeperNode implements AutoCloseable {
         String message = consoleMessageQueue.take();
         synchronized (consoleConnections) {
           for (int i = 0; i < consoleConnections.size(); i++) {
-            AsyncSocketInOutTriple connection = consoleConnections.get(i);
+            ConsumerBasedSocketInOutTriple connection = consoleConnections.get(i);
             if (connection == null || !connection.isOpen()) {
               consoleConnections.remove(i);
             } else {
-              connection.insertMessage(message);
+              connection.processMessage(message);
             }
           }
         }
@@ -159,7 +159,7 @@ public class ZooKeeperNode implements AutoCloseable {
       otherNodeAddresses.put(ctr++, InetAddress.getByName(line));
     }
     selfAddress = tmp;
-    electionManager = new ElectionManager.Bully(otherNodeAddresses, ID, this::getNewestDeliveredTimestamp, this::isRunning, this::getLocalHisTree);
+    electionManager = new ElectionManager.BullyManager(otherNodeAddresses, ID, this::getNewestDeliveredTimestamp, this::isRunning, this::getLocalHisTree);
     int leader = electionManager.getLeaderID();
     //HisTree, get it? It's a pun!... yea maybe that's better in my head, but we're sticking with it.
     localHisTree = readOwnHisTree(log);

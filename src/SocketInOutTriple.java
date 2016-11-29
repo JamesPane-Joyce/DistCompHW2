@@ -37,6 +37,15 @@ public class SocketInOutTriple implements AutoCloseable {
   public synchronized boolean blockingSendMessage(String... message) throws IOException {
     if (open) {
       out.writeObject(message);
+      out.flush();
+    }
+    return open;
+  }
+
+  public synchronized boolean blockingSendObject(Object o) throws IOException {
+    if(open){
+      out.writeObject(o);
+      out.flush();
     }
     return open;
   }
